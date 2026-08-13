@@ -14,11 +14,13 @@ from pathlib import Path
 from typing import cast
 
 from redditsurfer.domain import (
+    CaptionArtifact,
     JsonValue,
     NarrationScript,
     SelectionResult,
     SpeechArtifact,
     ThreadSnapshot,
+    Timeline,
 )
 from redditsurfer.errors import StorageError
 
@@ -122,6 +124,28 @@ class RunStorage:
             return SpeechArtifact.from_dict(self.read_json(run_id, "speech.json"))
         except ValueError as exc:
             raise StorageError(f"Speech artifact is invalid for run {run_id}.") from exc
+
+    def write_captions(self, run_id: str, captions: CaptionArtifact) -> None:
+        self.write_json(run_id, "captions.json", captions.to_dict())
+        self.record_artifact(run_id, "captions", "captions.json")
+        self.record_artifact(run_id, "captions_ass", captions.ass_path)
+        self.record_artifact(run_id, "captions_srt", captions.srt_path)
+
+    def read_captions(self, run_id: str) -> CaptionArtifact:
+        try:
+            return CaptionArtifact.from_dict(self.read_json(run_id, "captions.json"))
+        except ValueError as exc:
+            raise StorageError(f"Caption artifact is invalid for run {run_id}.") from exc
+
+    def write_timeline(self, run_id: str, timeline: Timeline) -> None:
+        self.write_json(run_id, "timeline.json", timeline.to_dict())
+        self.record_artifact(run_id, "timeline", "timeline.json")
+
+    def read_timeline(self, run_id: str) -> Timeline:
+        try:
+            return Timeline.from_dict(self.read_json(run_id, "timeline.json"))
+        except ValueError as exc:
+            raise StorageError(f"Timeline artifact is invalid for run {run_id}.") from exc
 
     def read_json(self, run_id: str, name: str) -> object:
         path = self.artifact_path(run_id, name)

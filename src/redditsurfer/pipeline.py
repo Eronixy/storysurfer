@@ -2,13 +2,26 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable
+from pathlib import Path
+from typing import Literal
 
+from redditsurfer.captions import build_caption_artifact, render_ass, render_srt
 from redditsurfer.config import AppConfig
-from redditsurfer.domain import NarrationScript, SelectionResult, SpeechArtifact, ThreadSnapshot
+from redditsurfer.domain import (
+    CaptionArtifact,
+    NarrationScript,
+    SelectionResult,
+    SpeechArtifact,
+    ThreadSnapshot,
+    Timeline,
+)
 from redditsurfer.editorial import select_thread
 from redditsurfer.editorial.script import build_narration_script, render_script_report
-from redditsurfer.errors import RedditSurferError
+from redditsurfer.errors import MediaError, RedditSurferError
+from redditsurfer.media import build_timeline, probe_media
+from redditsurfer.media.render import render_preview as render_media_preview
 from redditsurfer.reddit import PrawRedditClient, RedditThreadSource
 from redditsurfer.reddit.normalize import normalize_thread
 from redditsurfer.reddit.url import parse_reddit_reference
@@ -184,6 +197,11 @@ def narrate(
 ) -> SpeechArtifact:
     """Synthesize cached segment speech and compose absolute word timing."""
     script = storage.read_script(run_id)
+    previous = (
+        storage.read_speech(run_id)
+        if storage.artifact_path(run_id, "speech.json").is_file()
+        else None
+    )
     speech_public = config.public_dict()["speech"]
     input_hash = json_hash({"script": script.to_dict(), "speech": speech_public})
     storage.set_stage(run_id, "synthesize", "running", input_hash=input_hash)
@@ -197,6 +215,12 @@ def narrate(
             storage,
         )
         storage.set_stage(run_id, "synthesize", "completed", input_hash=input_hash)
+        if previous is not None and previous != artifact:
+            storage.mark_stages_stale(
+                run_id,
+                ("caption", "render", "verify"),
+                reason="Narration audio or timing changed; regenerate downstream artifacts.",
+            )
     except RedditSurferError as exc:
         storage.set_stage(
             run_id,
@@ -216,6 +240,119 @@ def narrate(
         )
         raise
     return artifact
+
+
+def caption_run(
+    run_id: str,
+    config: AppConfig,
+    storage: RunStorage,
+) -> CaptionArtifact:
+    """Generate inspectable ASS and SRT captions from measured narration timing."""
+    script = storage.read_script(run_id)
+    speech = storage.read_speech(run_id)
+    previous = (
+        storage.read_captions(run_id)
+        if storage.artifact_path(run_id, "captions.json").is_file()
+        else None
+    )
+    caption_public = config.public_dict()["captions"]
+    input_hash = json_hash(
+        {
+            "script": script.to_dict(),
+            "speech": speech.to_dict(),
+            "captions": caption_public,
+            "layout": {
+                "output_width": config.media.output_width,
+                "output_height": config.media.output_height,
+            },
+        }
+    )
+    storage.set_stage(run_id, "caption", "running", input_hash=input_hash)
+    try:
+        artifact = build_caption_artifact(script, speech, config.captions)
+        storage.write_text(
+            run_id,
+            artifact.ass_path,
+            render_ass(artifact, config.captions, config.media),
+        )
+        storage.write_text(run_id, artifact.srt_path, render_srt(artifact))
+        storage.write_captions(run_id, artifact)
+        storage.set_stage(run_id, "caption", "completed", input_hash=input_hash)
+        if previous is not None:
+            storage.mark_stages_stale(
+                run_id,
+                ("render", "verify"),
+                reason="Caption timing or style changed; regenerate downstream artifacts.",
+            )
+    except RedditSurferError as exc:
+        storage.set_stage(
+            run_id, "caption", "failed", message=exc.message, input_hash=input_hash
+        )
+        raise
+    except Exception:
+        storage.set_stage(
+            run_id,
+            "caption",
+            "failed",
+            message="Unexpected caption generation failure.",
+            input_hash=input_hash,
+        )
+        raise
+    return artifact
+
+
+def preview(
+    run_id: str,
+    background_path: Path,
+    preset: Literal["subway", "minecraft"],
+    config: AppConfig,
+    storage: RunStorage,
+    *,
+    crop_offset: float = 0.0,
+) -> Timeline:
+    """Probe user footage, persist a timeline, and atomically render preview.mp4."""
+    speech = storage.read_speech(run_id)
+    captions = storage.read_captions(run_id)
+    background = probe_media(background_path, config.media.ffprobe_path)
+    input_hash = json_hash(
+        {
+            "speech": speech.to_dict(),
+            "captions": captions.to_dict(),
+            "background_sha256": _file_hash(background.path),
+            "preset": preset,
+            "crop_offset": crop_offset,
+            "media": config.public_dict()["media"],
+        }
+    )
+    storage.set_stage(run_id, "render", "running", input_hash=input_hash)
+    try:
+        timeline = build_timeline(
+            speech,
+            captions,
+            background,
+            config.media,
+            preset=preset,
+            crop_offset=crop_offset,
+        )
+        storage.write_timeline(run_id, timeline)
+        render_media_preview(storage.run_dir(run_id), timeline, config.media)
+        storage.record_artifact(run_id, "preview", "preview.mp4")
+        storage.set_stage(run_id, "render", "completed", input_hash=input_hash)
+    except RedditSurferError as exc:
+        storage.set_stage(
+            run_id, "render", "failed", message=exc.message, input_hash=input_hash
+        )
+        raise
+    except Exception:
+        storage.set_stage(
+            run_id,
+            "render",
+            "failed",
+            message="Unexpected preview render failure.",
+            input_hash=input_hash,
+        )
+        raise
+    return timeline
 
 
 def _praw_source(config: AppConfig) -> RedditThreadSource:
@@ -238,3 +375,14 @@ def _script_content_hash(script: NarrationScript) -> str:
             "warnings": list(script.warnings),
         }
     )
+
+
+def _file_hash(path: Path) -> str:
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as source:
+            while chunk := source.read(1024 * 1024):
+                digest.update(chunk)
+    except OSError as exc:
+        raise MediaError(f"Could not read gameplay file: {path}") from exc
+    return digest.hexdigest()

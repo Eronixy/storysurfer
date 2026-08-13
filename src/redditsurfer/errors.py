@@ -63,3 +63,15 @@ class SpeechError(RedditSurferError):
 
 class AlignmentError(SpeechError):
     """Speech timing data is absent, invalid, or incompatible with the audio."""
+
+
+class CaptionError(RedditSurferError):
+    """Word timings cannot produce valid caption artifacts."""
+
+    exit_code = 9
+
+
+class MediaError(RedditSurferError):
+    """Input media is missing, corrupt, unsupported, or cannot be rendered."""
+
+    exit_code = 10

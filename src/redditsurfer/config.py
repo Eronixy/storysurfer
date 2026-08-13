@@ -50,6 +50,36 @@ def _fraction(data: Mapping[str, object], key: str, default: float) -> float:
     return result
 
 
+def _number(
+    data: Mapping[str, object], key: str, default: float, *, minimum: float, maximum: float
+) -> float:
+    value = data.get(key, default)
+    if not isinstance(value, int | float) or isinstance(value, bool):
+        raise ConfigurationError(f"Configuration value '{key}' must be a number.")
+    result = float(value)
+    if not minimum <= result <= maximum:
+        raise ConfigurationError(
+            f"Configuration value '{key}' must be from {minimum} to {maximum}."
+        )
+    return result
+
+
+def _boolean(data: Mapping[str, object], key: str, default: bool) -> bool:
+    value = data.get(key, default)
+    if not isinstance(value, bool):
+        raise ConfigurationError(f"Configuration value '{key}' must be true or false.")
+    return value
+
+
+def _color(data: Mapping[str, object], key: str, default: str) -> str:
+    value = _string(data, key, default).upper()
+    if not re.fullmatch(r"#[0-9A-F]{6}", value):
+        raise ConfigurationError(
+            f"Configuration value '{key}' must be a six-digit RGB color such as '#FFFFFF'."
+        )
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class RedditConfig:
     client_id: str | None
@@ -84,6 +114,33 @@ class StorageConfig:
 class MediaConfig:
     ffmpeg_path: str = "ffmpeg"
     ffprobe_path: str = "ffprobe"
+    output_width: int = 1080
+    output_height: int = 1920
+    frame_rate: int = 30
+    video_codec: str = "libx264"
+    audio_codec: str = "aac"
+    crf: int = 20
+    encoder_preset: str = "medium"
+    retain_background_audio: bool = False
+    background_volume: float = 0.12
+
+
+@dataclass(frozen=True, slots=True)
+class CaptionConfig:
+    font_name: str = "DejaVu Sans"
+    font_size: int = 72
+    primary_color: str = "#FFFFFF"
+    highlight_color: str = "#FFD54F"
+    outline_color: str = "#000000"
+    outline_size: int = 5
+    min_words: int = 2
+    max_words: int = 5
+    max_characters: int = 32
+    gap_break_ms: int = 420
+    tail_ms: int = 80
+    pop_ms: int = 120
+    margin_horizontal: int = 90
+    margin_bottom: int = 430
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +168,7 @@ class AppConfig:
     storage: StorageConfig
     media: MediaConfig
     speech: SpeechConfig = SpeechConfig()
+    captions: CaptionConfig = CaptionConfig()
 
     def public_dict(self) -> dict[str, JsonValue]:
         return {
@@ -133,6 +191,15 @@ class AppConfig:
             "media": {
                 "ffmpeg_path": self.media.ffmpeg_path,
                 "ffprobe_path": self.media.ffprobe_path,
+                "output_width": self.media.output_width,
+                "output_height": self.media.output_height,
+                "frame_rate": self.media.frame_rate,
+                "video_codec": self.media.video_codec,
+                "audio_codec": self.media.audio_codec,
+                "crf": self.media.crf,
+                "encoder_preset": self.media.encoder_preset,
+                "retain_background_audio": self.media.retain_background_audio,
+                "background_volume": self.media.background_volume,
             },
             "speech": {
                 "provider": self.speech.provider,
@@ -146,6 +213,22 @@ class AppConfig:
                 "connect_timeout_seconds": self.speech.connect_timeout_seconds,
                 "receive_timeout_seconds": self.speech.receive_timeout_seconds,
                 "pronunciations": [list(item) for item in self.speech.pronunciations],
+            },
+            "captions": {
+                "font_name": self.captions.font_name,
+                "font_size": self.captions.font_size,
+                "primary_color": self.captions.primary_color,
+                "highlight_color": self.captions.highlight_color,
+                "outline_color": self.captions.outline_color,
+                "outline_size": self.captions.outline_size,
+                "min_words": self.captions.min_words,
+                "max_words": self.captions.max_words,
+                "max_characters": self.captions.max_characters,
+                "gap_break_ms": self.captions.gap_break_ms,
+                "tail_ms": self.captions.tail_ms,
+                "pop_ms": self.captions.pop_ms,
+                "margin_horizontal": self.captions.margin_horizontal,
+                "margin_bottom": self.captions.margin_bottom,
             },
         }
 
@@ -232,6 +315,15 @@ def load_config(
     storage_data = _section(raw, "storage")
     media_data = _section(raw, "media")
     speech_data = _section(raw, "speech")
+    caption_data = _section(raw, "captions")
+    caption_min_words = _integer(
+        caption_data, "min_words", 2, minimum=1, maximum=10
+    )
+    caption_max_words = _integer(
+        caption_data, "max_words", 5, minimum=1, maximum=10
+    )
+    if caption_min_words > caption_max_words:
+        raise ConfigurationError("captions.min_words cannot exceed captions.max_words.")
     legacy_speech_keys = {
         "api_key",
         "voice_id",
@@ -259,6 +351,23 @@ def load_config(
         media=MediaConfig(
             ffmpeg_path=_string(media_data, "ffmpeg_path", "ffmpeg"),
             ffprobe_path=_string(media_data, "ffprobe_path", "ffprobe"),
+            output_width=_integer(
+                media_data, "output_width", 1080, minimum=240, maximum=7680
+            ),
+            output_height=_integer(
+                media_data, "output_height", 1920, minimum=240, maximum=7680
+            ),
+            frame_rate=_integer(media_data, "frame_rate", 30, minimum=15, maximum=120),
+            video_codec=_string(media_data, "video_codec", "libx264"),
+            audio_codec=_string(media_data, "audio_codec", "aac"),
+            crf=_integer(media_data, "crf", 20, minimum=0, maximum=51),
+            encoder_preset=_string(media_data, "encoder_preset", "medium"),
+            retain_background_audio=_boolean(
+                media_data, "retain_background_audio", False
+            ),
+            background_volume=_number(
+                media_data, "background_volume", 0.12, minimum=0.0, maximum=1.0
+            ),
         ),
         speech=SpeechConfig(
             provider=provider,
@@ -277,6 +386,32 @@ def load_config(
                 speech_data, "receive_timeout_seconds", 60, minimum=5, maximum=300
             ),
             pronunciations=pronunciations,
+        ),
+        captions=CaptionConfig(
+            font_name=_string(caption_data, "font_name", "DejaVu Sans"),
+            font_size=_integer(caption_data, "font_size", 72, minimum=12, maximum=240),
+            primary_color=_color(caption_data, "primary_color", "#FFFFFF"),
+            highlight_color=_color(caption_data, "highlight_color", "#FFD54F"),
+            outline_color=_color(caption_data, "outline_color", "#000000"),
+            outline_size=_integer(
+                caption_data, "outline_size", 5, minimum=0, maximum=20
+            ),
+            min_words=caption_min_words,
+            max_words=caption_max_words,
+            max_characters=_integer(
+                caption_data, "max_characters", 32, minimum=8, maximum=80
+            ),
+            gap_break_ms=_integer(
+                caption_data, "gap_break_ms", 420, minimum=0, maximum=5_000
+            ),
+            tail_ms=_integer(caption_data, "tail_ms", 80, minimum=0, maximum=1_000),
+            pop_ms=_integer(caption_data, "pop_ms", 120, minimum=0, maximum=1_000),
+            margin_horizontal=_integer(
+                caption_data, "margin_horizontal", 90, minimum=0, maximum=1_000
+            ),
+            margin_bottom=_integer(
+                caption_data, "margin_bottom", 430, minimum=0, maximum=1_500
+            ),
         ),
     )
 

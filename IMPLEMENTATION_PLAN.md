@@ -455,6 +455,11 @@ Acceptance: no spoken segment lacks a source reference; concatenated word timing
 
 ### Phase 3 - captions and media rendering
 
+Status: implemented with word-timed deterministic cue chunking, animated ASS and plain SRT
+sidecars, safe-area caption styles, Subway/Minecraft crop presets, validated local media probing,
+timeline artifacts, narration/background audio policy, atomic FFmpeg preview rendering, and a
+short synthetic integration render verified with ffprobe.
+
 - Implement caption chunking, ASS/SRT export, background presets, audio mixing, timeline generation, and FFmpeg rendering.
 - Add a small synthetic media fixture and a low-resolution integration render.
 

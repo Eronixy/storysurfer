@@ -20,6 +20,33 @@ storage:
 media:
   ffmpeg_path: "ffmpeg"
   ffprobe_path: "ffprobe"
+  output_width: 1080
+  output_height: 1920
+  frame_rate: 30
+  video_codec: "libx264"
+  audio_codec: "aac"
+  crf: 20
+  encoder_preset: "medium"
+  # Gameplay audio is removed unless this is explicitly enabled.
+  retain_background_audio: false
+  background_volume: 0.12
+
+captions:
+  # Font family is resolved by FFmpeg/libass through fontconfig.
+  font_name: "DejaVu Sans"
+  font_size: 72
+  primary_color: "#FFFFFF"
+  highlight_color: "#FFD54F"
+  outline_color: "#000000"
+  outline_size: 5
+  min_words: 2
+  max_words: 5
+  max_characters: 32
+  gap_break_ms: 420
+  tail_ms: 80
+  pop_ms: 120
+  margin_horizontal: 90
+  margin_bottom: 430
 
 speech:
   # Run `uv run edge-tts --list-voices` to browse available voice names.

@@ -63,3 +63,13 @@ def test_invalid_fraction_is_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigurationError, match="between 0 and 1"):
         load_config(config_path, environ={})
+
+
+def test_caption_word_limits_must_be_ordered(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "captions:\n  min_words: 5\n  max_words: 2\n", encoding="utf-8"
+    )
+
+    with pytest.raises(ConfigurationError, match="cannot exceed"):
+        load_config(config_path, environ={})

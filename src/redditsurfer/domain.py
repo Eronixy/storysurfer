@@ -11,6 +11,8 @@ THREAD_SCHEMA_VERSION = 1
 SELECTION_SCHEMA_VERSION = 1
 SCRIPT_SCHEMA_VERSION = 1
 SPEECH_SCHEMA_VERSION = 1
+CAPTION_SCHEMA_VERSION = 1
+TIMELINE_SCHEMA_VERSION = 1
 
 
 def _string(value: object, field_name: str) -> str:
@@ -407,6 +409,208 @@ class SpeechArtifact:
                 for key, item in raw_keys.items()
             },
         )
+
+
+@dataclass(frozen=True, slots=True)
+class CaptionWord:
+    text: str
+    start_ms: int
+    end_ms: int
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        return {"text": self.text, "start_ms": self.start_ms, "end_ms": self.end_ms}
+
+    @classmethod
+    def from_dict(cls, value: object) -> CaptionWord:
+        data = _mapping(value, "caption_word")
+        return cls(
+            text=_string(data.get("text"), "caption_word.text"),
+            start_ms=_integer(data.get("start_ms"), "caption_word.start_ms"),
+            end_ms=_integer(data.get("end_ms"), "caption_word.end_ms"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CaptionCue:
+    id: str
+    text: str
+    start_ms: int
+    end_ms: int
+    segment_id: str
+    speaker_label: str
+    style: Literal["title", "story", "commenter", "op"]
+    words: tuple[CaptionWord, ...]
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        return {
+            "id": self.id,
+            "text": self.text,
+            "start_ms": self.start_ms,
+            "end_ms": self.end_ms,
+            "segment_id": self.segment_id,
+            "speaker_label": self.speaker_label,
+            "style": self.style,
+            "words": [word.to_dict() for word in self.words],
+        }
+
+    @classmethod
+    def from_dict(cls, value: object) -> CaptionCue:
+        data = _mapping(value, "caption_cue")
+        style = _string(data.get("style"), "caption_cue.style")
+        if style not in {"title", "story", "commenter", "op"}:
+            raise ValueError(f"unsupported caption cue style: {style}")
+        raw_words = data.get("words")
+        if not isinstance(raw_words, list):
+            raise ValueError("caption_cue.words must be an array")
+        words = tuple(CaptionWord.from_dict(item) for item in raw_words)
+        if not words:
+            raise ValueError("caption_cue.words cannot be empty")
+        return cls(
+            id=_string(data.get("id"), "caption_cue.id"),
+            text=_string(data.get("text"), "caption_cue.text"),
+            start_ms=_integer(data.get("start_ms"), "caption_cue.start_ms"),
+            end_ms=_integer(data.get("end_ms"), "caption_cue.end_ms"),
+            segment_id=_string(data.get("segment_id"), "caption_cue.segment_id"),
+            speaker_label=_string(data.get("speaker_label"), "caption_cue.speaker_label"),
+            style=cast(Literal["title", "story", "commenter", "op"], style),
+            words=words,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CaptionArtifact:
+    duration_ms: int
+    ass_path: str
+    srt_path: str
+    cues: tuple[CaptionCue, ...]
+    schema_version: int = CAPTION_SCHEMA_VERSION
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        return {
+            "schema_version": self.schema_version,
+            "duration_ms": self.duration_ms,
+            "ass_path": self.ass_path,
+            "srt_path": self.srt_path,
+            "cues": [cue.to_dict() for cue in self.cues],
+        }
+
+    @classmethod
+    def from_dict(cls, value: object) -> CaptionArtifact:
+        data = _mapping(value, "caption_artifact")
+        version = _integer(data.get("schema_version"), "caption_artifact.schema_version")
+        if version != CAPTION_SCHEMA_VERSION:
+            raise ValueError(f"unsupported caption schema version: {version}")
+        raw_cues = data.get("cues")
+        if not isinstance(raw_cues, list):
+            raise ValueError("caption_artifact.cues must be an array")
+        cues = tuple(CaptionCue.from_dict(item) for item in raw_cues)
+        if not cues:
+            raise ValueError("caption_artifact.cues cannot be empty")
+        artifact = cls(
+            schema_version=version,
+            duration_ms=_integer(data.get("duration_ms"), "caption_artifact.duration_ms"),
+            ass_path=_string(data.get("ass_path"), "caption_artifact.ass_path"),
+            srt_path=_string(data.get("srt_path"), "caption_artifact.srt_path"),
+            cues=cues,
+        )
+        if artifact.duration_ms <= 0:
+            raise ValueError("caption_artifact.duration_ms must be positive")
+        previous_cue_end = 0
+        for cue in artifact.cues:
+            if cue.start_ms < previous_cue_end or cue.end_ms <= cue.start_ms:
+                raise ValueError("caption cues must be positive and monotonic")
+            if cue.end_ms > artifact.duration_ms:
+                raise ValueError("caption cue exceeds narration duration")
+            previous_word_end = cue.start_ms
+            for word in cue.words:
+                if word.start_ms < previous_word_end or word.end_ms <= word.start_ms:
+                    raise ValueError("caption words must be positive and monotonic")
+                if word.start_ms < cue.start_ms or word.end_ms > cue.end_ms:
+                    raise ValueError("caption word falls outside its cue")
+                previous_word_end = word.end_ms
+            previous_cue_end = cue.end_ms
+        return artifact
+
+
+@dataclass(frozen=True, slots=True)
+class Timeline:
+    duration_ms: int
+    background_path: str
+    background_duration_ms: int
+    background_has_audio: bool
+    background_looped: bool
+    preset: Literal["subway", "minecraft"]
+    crop_offset: float
+    narration_path: str
+    captions_path: str
+    output_width: int
+    output_height: int
+    frame_rate: int
+    retain_background_audio: bool
+    schema_version: int = TIMELINE_SCHEMA_VERSION
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        return {
+            "schema_version": self.schema_version,
+            "duration_ms": self.duration_ms,
+            "background_path": self.background_path,
+            "background_duration_ms": self.background_duration_ms,
+            "background_has_audio": self.background_has_audio,
+            "background_looped": self.background_looped,
+            "preset": self.preset,
+            "crop_offset": self.crop_offset,
+            "narration_path": self.narration_path,
+            "captions_path": self.captions_path,
+            "output_width": self.output_width,
+            "output_height": self.output_height,
+            "frame_rate": self.frame_rate,
+            "retain_background_audio": self.retain_background_audio,
+        }
+
+    @classmethod
+    def from_dict(cls, value: object) -> Timeline:
+        data = _mapping(value, "timeline")
+        version = _integer(data.get("schema_version"), "timeline.schema_version")
+        if version != TIMELINE_SCHEMA_VERSION:
+            raise ValueError(f"unsupported timeline schema version: {version}")
+        preset = _string(data.get("preset"), "timeline.preset")
+        if preset not in {"subway", "minecraft"}:
+            raise ValueError(f"unsupported background preset: {preset}")
+        timeline = cls(
+            schema_version=version,
+            duration_ms=_integer(data.get("duration_ms"), "timeline.duration_ms"),
+            background_path=_string(data.get("background_path"), "timeline.background_path"),
+            background_duration_ms=_integer(
+                data.get("background_duration_ms"), "timeline.background_duration_ms"
+            ),
+            background_has_audio=_boolean(
+                data.get("background_has_audio"), "timeline.background_has_audio"
+            ),
+            background_looped=_boolean(
+                data.get("background_looped"), "timeline.background_looped"
+            ),
+            preset=cast(Literal["subway", "minecraft"], preset),
+            crop_offset=_number(data.get("crop_offset"), "timeline.crop_offset"),
+            narration_path=_string(data.get("narration_path"), "timeline.narration_path"),
+            captions_path=_string(data.get("captions_path"), "timeline.captions_path"),
+            output_width=_integer(data.get("output_width"), "timeline.output_width"),
+            output_height=_integer(data.get("output_height"), "timeline.output_height"),
+            frame_rate=_integer(data.get("frame_rate"), "timeline.frame_rate"),
+            retain_background_audio=_boolean(
+                data.get("retain_background_audio"), "timeline.retain_background_audio"
+            ),
+        )
+        if timeline.duration_ms <= 0 or timeline.background_duration_ms <= 0:
+            raise ValueError("timeline durations must be positive")
+        if (
+            timeline.output_width <= 0
+            or timeline.output_height <= 0
+            or timeline.frame_rate <= 0
+        ):
+            raise ValueError("timeline output settings must be positive")
+        if not -1.0 <= timeline.crop_offset <= 1.0:
+            raise ValueError("timeline.crop_offset must be between -1 and 1")
+        return timeline
 
 
 @dataclass(frozen=True, slots=True)

@@ -10,7 +10,7 @@ from pathlib import Path
 from redditsurfer.config import AppConfig, load_config
 from redditsurfer.errors import RedditSurferError
 from redditsurfer.media.capabilities import check_media_capabilities
-from redditsurfer.pipeline import ingest, narrate, script_run, select
+from redditsurfer.pipeline import caption_run, ingest, narrate, preview, script_run, select
 from redditsurfer.storage import RunStorage
 
 
@@ -42,6 +42,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     narrate_parser.add_argument("run_id", help="existing run ID")
     _add_config_argument(narrate_parser)
+
+    caption_parser = subparsers.add_parser(
+        "caption", help="create word-timed animated ASS and plain SRT captions"
+    )
+    caption_parser.add_argument("run_id", help="existing run ID")
+    _add_config_argument(caption_parser)
+
+    preview_parser = subparsers.add_parser(
+        "preview", help="render a vertical preview using local gameplay"
+    )
+    preview_parser.add_argument("run_id", help="existing run ID")
+    preview_parser.add_argument(
+        "--background", required=True, type=Path, help="licensed local gameplay video"
+    )
+    preview_parser.add_argument(
+        "--preset", choices=("subway", "minecraft"), default="minecraft"
+    )
+    preview_parser.add_argument(
+        "--crop-offset",
+        type=float,
+        default=0.0,
+        help="normalized horizontal (subway) or vertical (minecraft) crop offset, -1 to 1",
+    )
+    _add_config_argument(preview_parser)
     return parser
 
 
@@ -97,6 +121,37 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             print(f"Audio: {storage.internal_path(arguments.run_id, speech.audio_path)}")
             print(f"Timing: {storage.artifact_path(arguments.run_id, 'speech.json')}")
+            print(f"Next: uv run redditsurfer caption {arguments.run_id}")
+            return 0
+        if arguments.command == "caption":
+            captions = caption_run(arguments.run_id, config, storage)
+            print(f"Run: {arguments.run_id}")
+            print(
+                f"Created {len(captions.cues)} word-timed cues through "
+                f"{captions.duration_ms / 1000:.1f}s"
+            )
+            print(f"ASS: {storage.artifact_path(arguments.run_id, captions.ass_path)}")
+            print(f"SRT: {storage.artifact_path(arguments.run_id, captions.srt_path)}")
+            print(
+                "Next: uv run redditsurfer preview "
+                f"{arguments.run_id} --background /path/to/gameplay.mp4"
+            )
+            return 0
+        if arguments.command == "preview":
+            timeline = preview(
+                arguments.run_id,
+                arguments.background,
+                arguments.preset,
+                config,
+                storage,
+                crop_offset=arguments.crop_offset,
+            )
+            print(f"Run: {arguments.run_id}")
+            print(
+                f"Rendered {timeline.output_width}x{timeline.output_height} "
+                f"{timeline.frame_rate}fps preview ({timeline.duration_ms / 1000:.1f}s)"
+            )
+            print(f"Video: {storage.artifact_path(arguments.run_id, 'preview.mp4')}")
             return 0
     except RedditSurferError as exc:
         print(f"Error: {exc.display()}", file=sys.stderr)
