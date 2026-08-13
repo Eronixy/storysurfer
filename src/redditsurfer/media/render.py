@@ -5,7 +5,9 @@ from __future__ import annotations
 import subprocess
 import tempfile
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
+from typing import Literal
 
 from redditsurfer.config import MediaConfig
 from redditsurfer.domain import Timeline
@@ -86,10 +88,28 @@ def render_preview(
     output_name: str = "preview.mp4",
     runner: Runner = subprocess.run,
 ) -> Path:
+    return render_video(
+        run_dir,
+        timeline,
+        media,
+        output_name=output_name,
+        runner=runner,
+    )
+
+
+def render_video(
+    run_dir: Path,
+    timeline: Timeline,
+    media: MediaConfig,
+    *,
+    output_name: str,
+    runner: Runner = subprocess.run,
+) -> Path:
     output = (run_dir / output_name).resolve()
     resolved_run_dir = run_dir.resolve()
-    if output.parent != resolved_run_dir or output.suffix.lower() != ".mp4":
-        raise MediaError("Preview output must be an MP4 directly inside the run directory.")
+    expected_name = "preview.mp4" if timeline.profile == "preview" else "final.mp4"
+    if output.parent != resolved_run_dir or output.name != expected_name:
+        raise MediaError(f"{timeline.profile.title()} output must be named {expected_name}.")
     narration = (run_dir / timeline.narration_path).resolve()
     captions = (run_dir / timeline.captions_path).resolve()
     if not narration.is_relative_to(resolved_run_dir) or not captions.is_relative_to(
@@ -104,7 +124,7 @@ def render_preview(
     temporary_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
-            dir=run_dir, prefix=".preview.", suffix=".mp4", delete=False
+            dir=run_dir, prefix=f".{timeline.profile}.", suffix=".mp4", delete=False
         ) as temporary:
             temporary_path = Path(temporary.name)
         temporary_path.unlink()
@@ -124,11 +144,13 @@ def render_preview(
                 else "unknown error"
             )
             raise MediaError(
-                f"FFmpeg preview render failed: {detail}",
+                f"FFmpeg {timeline.profile} render failed: {detail}",
                 hint="Run redditsurfer doctor and verify the gameplay file and configured codec.",
             )
         if not temporary_path.is_file() or temporary_path.stat().st_size == 0:
-            raise MediaError("FFmpeg reported success but produced no preview video.")
+            raise MediaError(
+                f"FFmpeg reported success but produced no {timeline.profile} video."
+            )
         temporary_path.replace(output)
         return output
     except FileNotFoundError as exc:
@@ -137,7 +159,7 @@ def render_preview(
             hint="Install FFmpeg or configure media.ffmpeg_path.",
         ) from exc
     except subprocess.TimeoutExpired as exc:
-        raise MediaError("FFmpeg preview render timed out.") from exc
+        raise MediaError(f"FFmpeg {timeline.profile} render timed out.") from exc
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
@@ -160,3 +182,17 @@ def _scale_crop_filter(timeline: Timeline) -> str:
 
 def _seconds(milliseconds: int) -> str:
     return f"{milliseconds / 1_000:.3f}"
+
+
+def media_for_profile(
+    media: MediaConfig, profile: Literal["preview", "final"]
+) -> MediaConfig:
+    if profile == "final":
+        return media
+    return replace(
+        media,
+        output_width=media.preview_width,
+        output_height=media.preview_height,
+        crf=media.preview_crf,
+        encoder_preset=media.preview_encoder_preset,
+    )

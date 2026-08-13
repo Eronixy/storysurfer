@@ -19,6 +19,10 @@ class MediaInfo:
     width: int
     height: int
     has_audio: bool
+    video_codec: str = ""
+    audio_codec: str | None = None
+    frame_rate: float = 0.0
+    pixel_format: str | None = None
 
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
@@ -83,16 +87,27 @@ def probe_media(
             duration = _duration_seconds(file_format.get("duration"))
     if duration is None or duration <= 0:
         raise MediaError("Gameplay input has no usable duration.")
-    has_audio = any(
-        isinstance(stream, dict) and stream.get("codec_type") == "audio"
-        for stream in streams
+    audio = next(
+        (
+            stream
+            for stream in streams
+            if isinstance(stream, dict) and stream.get("codec_type") == "audio"
+        ),
+        None,
     )
+    video_codec = video.get("codec_name")
+    pixel_format = video.get("pix_fmt")
+    audio_codec = audio.get("codec_name") if isinstance(audio, dict) else None
     return MediaInfo(
         path=resolved,
         duration_ms=round(duration * 1_000),
         width=width,
         height=height,
-        has_audio=has_audio,
+        has_audio=audio is not None,
+        video_codec=video_codec if isinstance(video_codec, str) else "",
+        audio_codec=audio_codec if isinstance(audio_codec, str) else None,
+        frame_rate=_frame_rate(video.get("avg_frame_rate")),
+        pixel_format=pixel_format if isinstance(pixel_format, str) else None,
     )
 
 
@@ -126,3 +141,14 @@ def _duration_seconds(value: object) -> float | None:
     except ValueError:
         return None
     return result if result is not None and result > 0 else None
+
+
+def _frame_rate(value: object) -> float:
+    if not isinstance(value, str):
+        return 0.0
+    try:
+        numerator_text, denominator_text = value.split("/", 1)
+        denominator = float(denominator_text)
+        return float(numerator_text) / denominator if denominator else 0.0
+    except (ValueError, ZeroDivisionError):
+        return 0.0

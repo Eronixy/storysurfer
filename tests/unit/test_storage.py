@@ -23,6 +23,11 @@ def test_run_artifacts_are_atomic_and_hashed(
     assert manifest["artifacts"]["thread"]["sha256"]
     assert manifest["stages"]["ingest"]["input_hash"] == "input-hash"
     assert storage.read_thread(run_id) == thread_snapshot
+    assert storage.stage_is_current(run_id, "ingest", "input-hash", ("thread",))
+
+    storage.artifact_path(run_id, "thread.json").write_text("corrupt", encoding="utf-8")
+
+    assert not storage.stage_is_current(run_id, "ingest", "input-hash", ("thread",))
 
 
 @pytest.mark.parametrize("name", ["../secret", "/tmp/secret", "nested/file.json"])

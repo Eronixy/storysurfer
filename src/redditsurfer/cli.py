@@ -3,14 +3,27 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
 from redditsurfer.config import AppConfig, load_config
-from redditsurfer.errors import RedditSurferError
+from redditsurfer.domain import ThreadSnapshot
+from redditsurfer.errors import ConfigurationError, RedditSurferError
+from redditsurfer.media import media_for_profile, probe_media
 from redditsurfer.media.capabilities import check_media_capabilities
-from redditsurfer.pipeline import caption_run, ingest, narrate, preview, script_run, select
+from redditsurfer.pipeline import (
+    build,
+    caption_run,
+    ingest,
+    narrate,
+    preview,
+    render_final,
+    script_run,
+    select,
+    verify,
+)
 from redditsurfer.storage import RunStorage
 
 
@@ -53,19 +66,53 @@ def build_parser() -> argparse.ArgumentParser:
         "preview", help="render a vertical preview using local gameplay"
     )
     preview_parser.add_argument("run_id", help="existing run ID")
-    preview_parser.add_argument(
-        "--background", required=True, type=Path, help="licensed local gameplay video"
-    )
-    preview_parser.add_argument(
-        "--preset", choices=("subway", "minecraft"), default="minecraft"
-    )
-    preview_parser.add_argument(
-        "--crop-offset",
-        type=float,
-        default=0.0,
-        help="normalized horizontal (subway) or vertical (minecraft) crop offset, -1 to 1",
-    )
+    _add_render_arguments(preview_parser)
     _add_config_argument(preview_parser)
+
+    render_parser = subparsers.add_parser(
+        "render", help="render rights-gated full-resolution final.mp4"
+    )
+    render_parser.add_argument("run_id", help="existing run ID")
+    _add_render_arguments(render_parser)
+    render_parser.add_argument(
+        "--acknowledge-rights",
+        action="store_true",
+        help="confirm that source content and all creative assets may be used",
+    )
+    _add_config_argument(render_parser)
+
+    verify_parser = subparsers.add_parser(
+        "verify", help="verify rendered streams, timing, captions, and artifacts"
+    )
+    verify_parser.add_argument("run_id", help="existing run ID")
+    verify_parser.add_argument(
+        "--profile", choices=("preview", "final"), default="final"
+    )
+    _add_config_argument(verify_parser)
+
+    build_parser = subparsers.add_parser(
+        "build", help="run or resume the complete pipeline"
+    )
+    build_parser.add_argument("source", nargs="?", help="Reddit submission URL or ID")
+    build_parser.add_argument(
+        "--thread-file", type=Path, help="normalized cached thread.json instead of Reddit"
+    )
+    build_parser.add_argument("--resume", metavar="RUN_ID", help="resume an existing run")
+    build_parser.add_argument(
+        "--profile", choices=("preview", "final"), default="preview"
+    )
+    build_parser.add_argument(
+        "--acknowledge-rights",
+        action="store_true",
+        help="required when --profile final is selected",
+    )
+    build_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="probe local inputs and show the plan without Reddit, TTS, or rendering",
+    )
+    _add_render_arguments(build_parser)
+    _add_config_argument(build_parser)
     return parser
 
 
@@ -89,15 +136,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"Next: uv run redditsurfer select {run_id}")
             return 0
         if arguments.command == "select":
-            result = select(arguments.run_id, config, storage)
-            selected = [candidate for candidate in result.candidates if candidate.selected]
+            selection_result = select(arguments.run_id, config, storage)
+            selected = [
+                candidate
+                for candidate in selection_result.candidates
+                if candidate.selected
+            ]
             exchanges = sum(candidate.kind == "op_exchange" for candidate in selected)
             print(f"Run: {arguments.run_id}")
             print(
                 f"Selected {len(selected)} candidates ({exchanges} OP exchanges), "
-                f"{result.selected_comment_words}/{result.comment_word_budget} comment words"
+                f"{selection_result.selected_comment_words}/"
+                f"{selection_result.comment_word_budget} comment words"
             )
-            for warning in result.warnings:
+            for warning in selection_result.warnings:
                 print(f"Warning: {warning}")
             print(f"Artifact: {storage.artifact_path(arguments.run_id, 'selection.json')}")
             return 0
@@ -146,12 +198,76 @@ def main(argv: Sequence[str] | None = None) -> int:
                 storage,
                 crop_offset=arguments.crop_offset,
             )
+            report = verify(arguments.run_id, "preview", config, storage)
             print(f"Run: {arguments.run_id}")
             print(
                 f"Rendered {timeline.output_width}x{timeline.output_height} "
                 f"{timeline.frame_rate}fps preview ({timeline.duration_ms / 1000:.1f}s)"
             )
             print(f"Video: {storage.artifact_path(arguments.run_id, 'preview.mp4')}")
+            print(f"Verification: {'passed' if report.passed else 'failed'}")
+            return 0
+        if arguments.command == "render":
+            timeline = render_final(
+                arguments.run_id,
+                arguments.background,
+                arguments.preset,
+                config,
+                storage,
+                acknowledge_rights=arguments.acknowledge_rights,
+                crop_offset=arguments.crop_offset,
+            )
+            report = verify(arguments.run_id, "final", config, storage)
+            print(f"Run: {arguments.run_id}")
+            print(
+                f"Rendered {timeline.output_width}x{timeline.output_height} "
+                f"{timeline.frame_rate}fps final ({timeline.duration_ms / 1000:.1f}s)"
+            )
+            print(f"Video: {storage.artifact_path(arguments.run_id, 'final.mp4')}")
+            print(f"Verification: {'passed' if report.passed else 'failed'}")
+            return 0
+        if arguments.command == "verify":
+            report = verify(arguments.run_id, arguments.profile, config, storage)
+            print(f"Run: {arguments.run_id}")
+            print(f"{arguments.profile.title()} verification passed")
+            for check in report.checks:
+                print(f"  {check.name}: {'pass' if check.passed else 'fail'} ({check.message})")
+            return 0
+        if arguments.command == "build":
+            cached_thread = (
+                _load_cached_thread(arguments.thread_file)
+                if arguments.thread_file is not None
+                else None
+            )
+            _validate_build_sources(
+                arguments.source, cached_thread, arguments.resume
+            )
+            if arguments.dry_run:
+                return _dry_run(arguments, config, storage)
+            build_result = build(
+                arguments.background,
+                arguments.preset,
+                config,
+                storage,
+                source_value=arguments.source,
+                cached_thread=cached_thread,
+                resume_run_id=arguments.resume,
+                profile=arguments.profile,
+                acknowledge_rights=arguments.acknowledge_rights,
+                crop_offset=arguments.crop_offset,
+            )
+            print(f"Run: {build_result.run_id}")
+            print(f"Profile: {build_result.profile}")
+            video_name = f"{build_result.profile}.mp4"
+            print(f"Video: {storage.artifact_path(build_result.run_id, video_name)}")
+            report_name = (
+                "verification.json"
+                if build_result.profile == "final"
+                else "verification-preview.json"
+            )
+            print(
+                f"Verification: {storage.artifact_path(build_result.run_id, report_name)}"
+            )
             return 0
     except RedditSurferError as exc:
         print(f"Error: {exc.display()}", file=sys.stderr)
@@ -162,6 +278,71 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _add_config_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--config", type=Path, help="YAML configuration path")
+
+
+def _add_render_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--background", required=True, type=Path, help="licensed local gameplay video"
+    )
+    parser.add_argument(
+        "--preset", choices=("subway", "minecraft"), default="minecraft"
+    )
+    parser.add_argument(
+        "--crop-offset",
+        type=float,
+        default=0.0,
+        help="normalized horizontal (subway) or vertical (minecraft) crop offset, -1 to 1",
+    )
+
+
+def _load_cached_thread(path: Path) -> ThreadSnapshot:
+    try:
+        return ThreadSnapshot.from_dict(json.loads(path.read_text(encoding="utf-8")))
+    except FileNotFoundError as exc:
+        raise ConfigurationError(f"Cached thread file does not exist: {path}") from exc
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        raise ConfigurationError(f"Cached thread file is invalid: {path}") from exc
+
+
+def _validate_build_sources(
+    source: str | None,
+    cached_thread: ThreadSnapshot | None,
+    resume_run_id: str | None,
+) -> None:
+    supplied = sum(value is not None for value in (source, cached_thread, resume_run_id))
+    if supplied != 1:
+        raise ConfigurationError(
+            "Build requires exactly one SOURCE, --thread-file, or --resume RUN_ID."
+        )
+
+
+def _dry_run(arguments: argparse.Namespace, config: AppConfig, storage: RunStorage) -> int:
+    info = probe_media(arguments.background, config.media.ffprobe_path)
+    media = media_for_profile(config.media, arguments.profile)
+    print("Dry run: no Reddit, Edge TTS, or FFmpeg render work will be performed.")
+    if arguments.resume:
+        print(f"Run: {arguments.resume}")
+        statuses = storage.stage_statuses(arguments.resume)
+        print(
+            "Existing stages: "
+            + (", ".join(f"{name}={status}" for name, status in statuses.items()) or "none")
+        )
+    elif arguments.thread_file:
+        print(f"Reddit input: cached {arguments.thread_file}")
+    else:
+        print(f"Reddit input: live {arguments.source}")
+    print(f"Speech: {config.speech.provider} / {config.speech.voice}")
+    print(
+        f"Gameplay: {info.width}x{info.height}, {info.duration_ms / 1000:.1f}s, "
+        f"audio={'yes' if info.has_audio else 'no'}"
+    )
+    print(
+        f"Output: {arguments.profile} {media.output_width}x{media.output_height} "
+        f"at {media.frame_rate}fps"
+    )
+    if arguments.profile == "final" and not arguments.acknowledge_rights:
+        print("Blocked final step: pass --acknowledge-rights after reviewing sources/assets.")
+    return 0
 
 
 def _doctor(config: AppConfig) -> int:

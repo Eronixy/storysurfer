@@ -123,6 +123,11 @@ class MediaConfig:
     encoder_preset: str = "medium"
     retain_background_audio: bool = False
     background_volume: float = 0.12
+    preview_width: int = 540
+    preview_height: int = 960
+    preview_crf: int = 28
+    preview_encoder_preset: str = "veryfast"
+    duration_tolerance_ms: int = 150
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,6 +205,11 @@ class AppConfig:
                 "encoder_preset": self.media.encoder_preset,
                 "retain_background_audio": self.media.retain_background_audio,
                 "background_volume": self.media.background_volume,
+                "preview_width": self.media.preview_width,
+                "preview_height": self.media.preview_height,
+                "preview_crf": self.media.preview_crf,
+                "preview_encoder_preset": self.media.preview_encoder_preset,
+                "duration_tolerance_ms": self.media.duration_tolerance_ms,
             },
             "speech": {
                 "provider": self.speech.provider,
@@ -367,6 +377,19 @@ def load_config(
             ),
             background_volume=_number(
                 media_data, "background_volume", 0.12, minimum=0.0, maximum=1.0
+            ),
+            preview_width=_integer(
+                media_data, "preview_width", 540, minimum=240, maximum=2160
+            ),
+            preview_height=_integer(
+                media_data, "preview_height", 960, minimum=240, maximum=3840
+            ),
+            preview_crf=_integer(media_data, "preview_crf", 28, minimum=0, maximum=51),
+            preview_encoder_preset=_string(
+                media_data, "preview_encoder_preset", "veryfast"
+            ),
+            duration_tolerance_ms=_integer(
+                media_data, "duration_tolerance_ms", 150, minimum=20, maximum=2_000
             ),
         ),
         speech=SpeechConfig(

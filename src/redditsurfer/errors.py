@@ -75,3 +75,15 @@ class MediaError(RedditSurferError):
     """Input media is missing, corrupt, unsupported, or cannot be rendered."""
 
     exit_code = 10
+
+
+class RightsError(RedditSurferError):
+    """A final render was requested without the required rights acknowledgement."""
+
+    exit_code = 11
+
+
+class VerificationError(RedditSurferError):
+    """A rendered artifact failed an objective quality check."""
+
+    exit_code = 12

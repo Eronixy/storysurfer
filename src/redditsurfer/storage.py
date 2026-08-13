@@ -8,7 +8,7 @@ import os
 import re
 import tempfile
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
@@ -21,6 +21,7 @@ from redditsurfer.domain import (
     SpeechArtifact,
     ThreadSnapshot,
     Timeline,
+    VerificationReport,
 )
 from redditsurfer.errors import StorageError
 
@@ -137,15 +138,41 @@ class RunStorage:
         except ValueError as exc:
             raise StorageError(f"Caption artifact is invalid for run {run_id}.") from exc
 
-    def write_timeline(self, run_id: str, timeline: Timeline) -> None:
-        self.write_json(run_id, "timeline.json", timeline.to_dict())
-        self.record_artifact(run_id, "timeline", "timeline.json")
+    def write_timeline(
+        self,
+        run_id: str,
+        timeline: Timeline,
+        *,
+        name: str = "timeline.json",
+        artifact_key: str = "timeline",
+    ) -> None:
+        self.write_json(run_id, name, timeline.to_dict())
+        self.record_artifact(run_id, artifact_key, name)
 
-    def read_timeline(self, run_id: str) -> Timeline:
+    def read_timeline(self, run_id: str, *, name: str = "timeline.json") -> Timeline:
         try:
-            return Timeline.from_dict(self.read_json(run_id, "timeline.json"))
+            return Timeline.from_dict(self.read_json(run_id, name))
         except ValueError as exc:
             raise StorageError(f"Timeline artifact is invalid for run {run_id}.") from exc
+
+    def write_verification(
+        self,
+        run_id: str,
+        report: VerificationReport,
+        *,
+        name: str,
+        artifact_key: str,
+    ) -> None:
+        self.write_json(run_id, name, report.to_dict())
+        self.record_artifact(run_id, artifact_key, name)
+
+    def read_verification(self, run_id: str, *, name: str) -> VerificationReport:
+        try:
+            return VerificationReport.from_dict(self.read_json(run_id, name))
+        except ValueError as exc:
+            raise StorageError(
+                f"Verification artifact is invalid for run {run_id}."
+            ) from exc
 
     def read_json(self, run_id: str, name: str) -> object:
         path = self.artifact_path(run_id, name)
@@ -282,12 +309,77 @@ class RunStorage:
             raise StorageError("Run manifest artifacts are invalid.")
         path = self.internal_path(run_id, name)
         try:
-            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            digest = file_hash(path)
         except OSError as exc:
             raise StorageError(f"Could not hash artifact: {name}") from exc
         artifacts[key] = {"path": name, "sha256": digest}
         manifest["updated_at"] = self._now()
         self.write_json(run_id, "manifest.json", manifest)
+
+    def stage_is_current(
+        self,
+        run_id: str,
+        stage: str,
+        input_hash: str,
+        artifact_keys: tuple[str, ...],
+    ) -> bool:
+        """Return true only for a completed stage with intact declared outputs."""
+        manifest = self._manifest(run_id)
+        stages = manifest.get("stages")
+        artifacts = manifest.get("artifacts")
+        if not isinstance(stages, dict) or not isinstance(artifacts, dict):
+            return False
+        record = stages.get(stage)
+        if not isinstance(record, dict):
+            return False
+        if record.get("status") != "completed" or record.get("input_hash") != input_hash:
+            return False
+        return all(self._artifact_is_current(run_id, artifacts, key) for key in artifact_keys)
+
+    def stage_statuses(self, run_id: str) -> dict[str, str]:
+        manifest = self._manifest(run_id)
+        stages = manifest.get("stages")
+        if not isinstance(stages, dict):
+            raise StorageError("Run manifest stages are invalid.")
+        result: dict[str, str] = {}
+        for stage, raw_record in stages.items():
+            if not isinstance(stage, str) or not isinstance(raw_record, dict):
+                raise StorageError("Run manifest stage record is invalid.")
+            status = raw_record.get("status")
+            if not isinstance(status, str):
+                raise StorageError("Run manifest stage status is invalid.")
+            result[stage] = status
+        return result
+
+    def artifacts_are_current(self, run_id: str, artifact_keys: tuple[str, ...]) -> bool:
+        manifest = self._manifest(run_id)
+        artifacts = manifest.get("artifacts")
+        if not isinstance(artifacts, dict):
+            return False
+        return all(self._artifact_is_current(run_id, artifacts, key) for key in artifact_keys)
+
+    def read_manifest(self, run_id: str) -> dict[str, JsonValue]:
+        """Return the validated top-level manifest for diagnostics and orchestration."""
+        return self._manifest(run_id)
+
+    def _artifact_is_current(
+        self,
+        run_id: str,
+        artifacts: Mapping[str, JsonValue],
+        key: str,
+    ) -> bool:
+        record = artifacts.get(key)
+        if not isinstance(record, dict):
+            return False
+        relative_path = record.get("path")
+        expected_hash = record.get("sha256")
+        if not isinstance(relative_path, str) or not isinstance(expected_hash, str):
+            return False
+        try:
+            path = self.internal_path(run_id, relative_path)
+            return path.is_file() and file_hash(path) == expected_hash
+        except (OSError, StorageError):
+            return False
 
     def _manifest(self, run_id: str) -> dict[str, JsonValue]:
         value = self.read_json(run_id, "manifest.json")
@@ -306,3 +398,11 @@ def json_hash(value: object) -> str:
         value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def file_hash(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        while chunk := source.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()

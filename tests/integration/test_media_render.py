@@ -34,6 +34,10 @@ def test_short_vertical_preview_has_expected_streams_and_timing(
         frame_rate=30,
         crf=28,
         encoder_preset="ultrafast",
+        preview_width=180,
+        preview_height=320,
+        preview_crf=28,
+        preview_encoder_preset="ultrafast",
     )
     caption_config = CaptionConfig(
         font_size=20,

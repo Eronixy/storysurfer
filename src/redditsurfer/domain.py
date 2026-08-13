@@ -13,6 +13,7 @@ SCRIPT_SCHEMA_VERSION = 1
 SPEECH_SCHEMA_VERSION = 1
 CAPTION_SCHEMA_VERSION = 1
 TIMELINE_SCHEMA_VERSION = 1
+VERIFICATION_SCHEMA_VERSION = 1
 
 
 def _string(value: object, field_name: str) -> str:
@@ -547,6 +548,8 @@ class Timeline:
     output_height: int
     frame_rate: int
     retain_background_audio: bool
+    profile: Literal["preview", "final"] = "preview"
+    rights_acknowledged: bool = False
     schema_version: int = TIMELINE_SCHEMA_VERSION
 
     def to_dict(self) -> dict[str, JsonValue]:
@@ -565,6 +568,8 @@ class Timeline:
             "output_height": self.output_height,
             "frame_rate": self.frame_rate,
             "retain_background_audio": self.retain_background_audio,
+            "profile": self.profile,
+            "rights_acknowledged": self.rights_acknowledged,
         }
 
     @classmethod
@@ -576,6 +581,9 @@ class Timeline:
         preset = _string(data.get("preset"), "timeline.preset")
         if preset not in {"subway", "minecraft"}:
             raise ValueError(f"unsupported background preset: {preset}")
+        profile = _string(data.get("profile", "preview"), "timeline.profile")
+        if profile not in {"preview", "final"}:
+            raise ValueError(f"unsupported render profile: {profile}")
         timeline = cls(
             schema_version=version,
             duration_ms=_integer(data.get("duration_ms"), "timeline.duration_ms"),
@@ -599,6 +607,10 @@ class Timeline:
             retain_background_audio=_boolean(
                 data.get("retain_background_audio"), "timeline.retain_background_audio"
             ),
+            profile=cast(Literal["preview", "final"], profile),
+            rights_acknowledged=_boolean(
+                data.get("rights_acknowledged", False), "timeline.rights_acknowledged"
+            ),
         )
         if timeline.duration_ms <= 0 or timeline.background_duration_ms <= 0:
             raise ValueError("timeline durations must be positive")
@@ -611,6 +623,105 @@ class Timeline:
         if not -1.0 <= timeline.crop_offset <= 1.0:
             raise ValueError("timeline.crop_offset must be between -1 and 1")
         return timeline
+
+
+@dataclass(frozen=True, slots=True)
+class QualityCheck:
+    name: str
+    passed: bool
+    message: str
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        return {"name": self.name, "passed": self.passed, "message": self.message}
+
+    @classmethod
+    def from_dict(cls, value: object) -> QualityCheck:
+        data = _mapping(value, "quality_check")
+        return cls(
+            name=_string(data.get("name"), "quality_check.name"),
+            passed=_boolean(data.get("passed"), "quality_check.passed"),
+            message=_string(data.get("message"), "quality_check.message"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class VerificationReport:
+    profile: Literal["preview", "final"]
+    artifact_path: str
+    checked_at: str
+    passed: bool
+    duration_ms: int
+    width: int
+    height: int
+    frame_rate: float
+    video_codec: str
+    audio_codec: str | None
+    pixel_format: str | None
+    checks: tuple[QualityCheck, ...]
+    schema_version: int = VERIFICATION_SCHEMA_VERSION
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        return {
+            "schema_version": self.schema_version,
+            "profile": self.profile,
+            "artifact_path": self.artifact_path,
+            "checked_at": self.checked_at,
+            "passed": self.passed,
+            "duration_ms": self.duration_ms,
+            "width": self.width,
+            "height": self.height,
+            "frame_rate": self.frame_rate,
+            "video_codec": self.video_codec,
+            "audio_codec": self.audio_codec,
+            "pixel_format": self.pixel_format,
+            "checks": [check.to_dict() for check in self.checks],
+        }
+
+    @classmethod
+    def from_dict(cls, value: object) -> VerificationReport:
+        data = _mapping(value, "verification_report")
+        version = _integer(
+            data.get("schema_version"), "verification_report.schema_version"
+        )
+        if version != VERIFICATION_SCHEMA_VERSION:
+            raise ValueError(f"unsupported verification schema version: {version}")
+        profile = _string(data.get("profile"), "verification_report.profile")
+        if profile not in {"preview", "final"}:
+            raise ValueError(f"unsupported verification profile: {profile}")
+        raw_checks = data.get("checks")
+        if not isinstance(raw_checks, list):
+            raise ValueError("verification_report.checks must be an array")
+        checks = tuple(QualityCheck.from_dict(check) for check in raw_checks)
+        passed = _boolean(data.get("passed"), "verification_report.passed")
+        if passed != all(check.passed for check in checks):
+            raise ValueError("verification_report.passed disagrees with its checks")
+        return cls(
+            schema_version=version,
+            profile=cast(Literal["preview", "final"], profile),
+            artifact_path=_string(
+                data.get("artifact_path"), "verification_report.artifact_path"
+            ),
+            checked_at=_string(data.get("checked_at"), "verification_report.checked_at"),
+            passed=passed,
+            duration_ms=_integer(
+                data.get("duration_ms"), "verification_report.duration_ms"
+            ),
+            width=_integer(data.get("width"), "verification_report.width"),
+            height=_integer(data.get("height"), "verification_report.height"),
+            frame_rate=_number(
+                data.get("frame_rate"), "verification_report.frame_rate"
+            ),
+            video_codec=_string(
+                data.get("video_codec"), "verification_report.video_codec"
+            ),
+            audio_codec=_optional_string(
+                data.get("audio_codec"), "verification_report.audio_codec"
+            ),
+            pixel_format=_optional_string(
+                data.get("pixel_format"), "verification_report.pixel_format"
+            ),
+            checks=checks,
+        )
 
 
 @dataclass(frozen=True, slots=True)

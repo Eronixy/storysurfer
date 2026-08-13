@@ -30,6 +30,12 @@ media:
   # Gameplay audio is removed unless this is explicitly enabled.
   retain_background_audio: false
   background_volume: 0.12
+  # Preview renders use a faster, lower-resolution profile.
+  preview_width: 540
+  preview_height: 960
+  preview_crf: 28
+  preview_encoder_preset: "veryfast"
+  duration_tolerance_ms: 150
 
 captions:
   # Font family is resolved by FFmpeg/libass through fontconfig.

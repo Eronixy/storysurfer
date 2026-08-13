@@ -2,9 +2,9 @@
 
 RedditSurfer is a Python pipeline for producing source-linked, narrated vertical videos from public Reddit posts and user-supplied gameplay footage. See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for the product roadmap.
 
-Phases 0 through 3 provide the project foundation, authenticated Reddit ingestion,
+Phases 0 through 4 provide the project foundation, authenticated Reddit ingestion,
 deterministic selection of relevant comments and direct OP replies, Edge TTS narration,
-word-timed captions, and vertical FFmpeg preview rendering.
+word-timed captions, resumable preview/final rendering, and ffprobe-based quality checks.
 
 ## Setup
 
@@ -24,6 +24,31 @@ uv run redditsurfer doctor
 ```
 
 ## Current CLI workflow
+
+Run a complete preview build from Reddit:
+
+```bash
+uv run redditsurfer build \
+  "https://www.reddit.com/r/example/comments/abc123/example/" \
+  --background /path/to/licensed-gameplay.mp4 \
+  --preset minecraft
+```
+
+For offline testing, replace the Reddit URL with `--thread-file path/to/thread.json`. Inspect a
+plan without making Reddit, Edge TTS, or rendering calls with `--dry-run`.
+
+If a build fails, its error includes the run ID. Resume only the invalid or incomplete stages:
+
+```bash
+uv run redditsurfer build --resume RUN_ID \
+  --background /path/to/licensed-gameplay.mp4 \
+  --preset minecraft
+```
+
+Completed stages are reused only when their input hash and every declared artifact checksum
+still match. Edge TTS also retains its per-segment cache as a second layer of retry protection.
+
+The equivalent reviewable stage-by-stage workflow starts by fetching and normalizing a thread:
 
 Fetch and normalize a public thread:
 
@@ -55,16 +80,31 @@ uv run redditsurfer preview RUN_ID \
   --crop-offset 0
 ```
 
+After reviewing the source report, preview, captions, and asset rights, create the full-resolution
+delivery and verify it:
+
+```bash
+uv run redditsurfer render RUN_ID \
+  --background /path/to/licensed-gameplay.mp4 \
+  --preset minecraft \
+  --acknowledge-rights
+
+uv run redditsurfer verify RUN_ID --profile final
+```
+
+The acknowledgement confirms that the Reddit content, gameplay, music, fonts, and intended
+output use are permitted. It is required before any one-command final build work begins.
+
 Artifacts are written under `runs/<run-id>`, including `thread.json`, `selection.json`,
 `script.json`, `script.txt`, `speech.json`, `speech/narration.wav`, `captions.json`,
-`captions.ass`, `captions.srt`, `timeline.json`, and `preview.mp4`. Captions are chunked from
+`captions.ass`, `captions.srt`, `timeline-preview.json`, `preview.mp4`, and
+`verification-preview.json`. A final render additionally creates `timeline-final.json`,
+`final.mp4`, and `verification.json`. Captions are chunked from
 Edge TTS word timestamps, not estimated reading speed. Gameplay audio is stripped by default;
 enable `media.retain_background_audio` only when the audio is also licensed. Real snapshots and
 generated artifacts are ignored by Git. Narration is synthesized one segment at a time and
-cached, so unchanged completed segments are reused after a retry.
-
-The Phase 3 command intentionally creates `preview.mp4`. Rights acknowledgement, final output,
-resume verification, and the end-to-end build command belong to Phase 4.
+cached, so unchanged completed segments are reused after a retry. The browser workflow remains
+planned for Phase 5; the CLI and web UI will share these same application services.
 
 ## Development
 

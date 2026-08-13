@@ -19,6 +19,8 @@ def build_timeline(
     *,
     preset: Literal["subway", "minecraft"],
     crop_offset: float = 0.0,
+    profile: Literal["preview", "final"] = "preview",
+    rights_acknowledged: bool = False,
 ) -> Timeline:
     if not -1.0 <= crop_offset <= 1.0:
         raise MediaError("Background crop offset must be between -1 and 1.")
@@ -46,4 +48,6 @@ def build_timeline(
         output_height=media.output_height,
         frame_rate=media.frame_rate,
         retain_background_audio=media.retain_background_audio and background.has_audio,
+        profile=profile,
+        rights_acknowledged=rights_acknowledged,
     )

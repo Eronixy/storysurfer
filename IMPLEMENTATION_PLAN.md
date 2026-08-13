@@ -299,15 +299,23 @@ runs/<run-id>/
   script.json
   script.txt
   speech/
+  speech.json
+  captions.json
   captions.ass
   captions.srt
-  timeline.json
+  timeline-preview.json
+  timeline-final.json
   preview.mp4
   final.mp4
+  verification-preview.json
+  verification.json
   logs/
 ```
 
-Pipeline stages are `ingest`, `select`, `script`, `synthesize`, `caption`, `render`, and `verify`. A stage can resume only when the hashes of its inputs and relevant configuration still match. Failed runs keep their review artifacts and report the failed stage; they must not masquerade as successful output.
+Pipeline stages are `ingest`, `select`, `script`, `synthesize`, `caption`, profile-specific
+`render`, and profile-specific `verify`. A stage can resume only when the hashes of its inputs,
+relevant configuration, and declared outputs still match. Failed runs keep their review artifacts
+and report the failed stage; they must not masquerade as successful output.
 
 Large media, generated audio, run directories, credentials, and API snapshots containing real user content must be excluded from Git. Tests use deliberately sanitized fixtures.
 
@@ -466,6 +474,11 @@ short synthetic integration render verified with ffprobe.
 Acceptance: a fixture build produces a playable vertical MP4; captions stay in the safe area and within narration duration; `ffprobe` reports the intended streams, frame rate, and dimensions.
 
 ### Phase 4 - end-to-end CLI and quality checks
+
+Status: implemented with checksum-validated stage reuse, cached normalized-thread builds,
+failure/resume diagnostics, low-resolution preview and full-resolution final profiles, an
+up-front final-render rights gate, persisted ffprobe quality reports, and interruption/cache
+invalidation integration tests that prove completed speech is not requested again.
 
 - Connect resumable stages to the CLI.
 - Add preview/final profiles, rights acknowledgement, useful diagnostics, and final verification.
