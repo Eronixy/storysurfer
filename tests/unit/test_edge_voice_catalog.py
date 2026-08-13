@@ -5,6 +5,7 @@ import asyncio
 from storysurfer.speech.voices import (
     fetch_edge_voices,
     language_choices,
+    language_choices_for_voice,
     locale_for_voice,
     voice_choices,
 )
@@ -68,3 +69,13 @@ def test_edge_voice_catalog_skips_invalid_and_deduplicates_names() -> None:
     voices = asyncio.run(fetch_edge_voices(fetcher=records))
 
     assert [voice.name for voice in voices] == ["en-GB-RyanNeural"]
+
+
+def test_saved_filipino_voice_remains_valid_before_catalog_refresh() -> None:
+    languages, locale = language_choices_for_voice((), "fil-PH-AngeloNeural")
+    choices, selected = voice_choices((), locale, selected="fil-PH-AngeloNeural")
+
+    assert languages == [("fil-PH", "fil-PH")]
+    assert locale == "fil-PH"
+    assert choices == [("fil-PH-AngeloNeural", "fil-PH-AngeloNeural")]
+    assert selected == "fil-PH-AngeloNeural"

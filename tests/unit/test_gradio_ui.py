@@ -15,9 +15,7 @@ from storysurfer.gradio_ui import (
 )
 
 
-def test_gradio_ui_exposes_private_complete_workflow(
-    app_config: AppConfig, tmp_path: Path
-) -> None:
+def test_gradio_ui_exposes_private_complete_workflow(app_config: AppConfig, tmp_path: Path) -> None:
     uploads = tmp_path / "uploads"
     uploads.mkdir()
     config = replace(
@@ -25,9 +23,7 @@ def test_gradio_ui_exposes_private_complete_workflow(
         storage=StorageConfig(tmp_path / "runs"),
         web=WebConfig(database_path=tmp_path / "jobs.sqlite3"),
     )
-    application = create_gradio_app(
-        config, start_worker=False, upload_root=uploads
-    )
+    application = create_gradio_app(config, start_worker=False, upload_root=uploads)
     browser = application.demo.get_config_file()
     labels = {item["props"].get("label") for item in browser["components"]}
 
@@ -41,16 +37,22 @@ def test_gradio_ui_exposes_private_complete_workflow(
     tab_items = [item for item in browser["components"] if item["type"] == "tabitem"]
     assert tabs[0]["props"]["elem_classes"] == ["ss-tabs"]
     assert len(tab_items) == 4
-    assert all(
-        item["props"]["elem_classes"] == ["ss-tab-content"] for item in tab_items
-    )
+    assert all(item["props"]["elem_classes"] == ["ss-tab-content"] for item in tab_items)
     voice_controls = [
-        item
-        for item in browser["components"]
-        if item["props"].get("label") == "Edge TTS voice"
+        item for item in browser["components"] if item["props"].get("label") == "Edge TTS voice"
     ]
     assert len(voice_controls) == 2
     assert {item["type"] for item in voice_controls} == {"dropdown"}
+    components = {item["id"]: item for item in browser["components"]}
+    locale_filter_events = [
+        dependency["targets"][0][1]
+        for dependency in browser["dependencies"]
+        if any(
+            components[component_id]["props"].get("label") == "Narration language / locale"
+            for component_id in dependency["inputs"]
+        )
+    ]
+    assert locale_filter_events == ["input", "input"]
 
 
 def test_upload_is_contained_size_limited_and_copied_atomically(tmp_path: Path) -> None:

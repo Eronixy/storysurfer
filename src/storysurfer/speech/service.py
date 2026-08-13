@@ -8,7 +8,7 @@ from typing import cast
 from storysurfer.config import SpeechConfig
 from storysurfer.domain import JsonValue, NarrationScript, SpeechArtifact, SpokenWord
 from storysurfer.errors import AlignmentError, SpeechError, StorageError
-from storysurfer.speech.alignment import validate_segment_speech
+from storysurfer.speech.alignment import normalize_segment_speech, validate_segment_speech
 from storysurfer.speech.base import RelativeWord, SegmentSpeech, SpeechProvider
 from storysurfer.speech.wav import decode_wav, encode_wav
 from storysurfer.storage import RunStorage, json_hash
@@ -29,9 +29,7 @@ def synthesize_script(
     for segment in script.segments:
         if cancel_check is not None:
             cancel_check()
-        cache_key = json_hash(
-            {"spoken_text": segment.spoken_text, "provider_settings": settings}
-        )
+        cache_key = json_hash({"spoken_text": segment.spoken_text, "provider_settings": settings})
         speech = _load_or_synthesize(
             run_id,
             cache_key,
@@ -104,8 +102,7 @@ def _load_or_synthesize(
     if wav_exists:
         return _read_cache(run_id, cache_key, wav_path, metadata_path, storage)
 
-    speech = provider.synthesize(text)
-    validate_segment_speech(speech)
+    speech = _synthesize_validated(text, provider)
     storage.write_bytes(run_id, wav_path, encode_wav(speech.pcm_s16le, speech.sample_rate))
     metadata: dict[str, JsonValue] = {
         "cache_key": cache_key,
@@ -118,6 +115,20 @@ def _load_or_synthesize(
     }
     storage.write_json_internal(run_id, metadata_path, metadata)
     return speech
+
+
+def _synthesize_validated(text: str, provider: SpeechProvider) -> SegmentSpeech:
+    alignment_error: AlignmentError | None = None
+    for _attempt in range(2):
+        try:
+            speech = normalize_segment_speech(provider.synthesize(text))
+            validate_segment_speech(speech)
+        except AlignmentError as exc:
+            alignment_error = exc
+            continue
+        return speech
+    assert alignment_error is not None
+    raise alignment_error
 
 
 def _read_cache(
@@ -158,6 +169,7 @@ def _read_cache(
             raise SpeechError(f"Speech cache word timing is invalid: {cache_key[:12]}")
         words.append(RelativeWord(text=text, start_ms=start, end_ms=end))
     speech = SegmentSpeech(pcm_s16le=pcm, sample_rate=sample_rate, words=tuple(words))
+    speech = normalize_segment_speech(speech)
     validate_segment_speech(speech)
     return speech
 

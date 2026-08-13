@@ -14,9 +14,14 @@ from edge_tts.exceptions import EdgeTTSException
 
 from storysurfer.config import SpeechConfig
 from storysurfer.domain import JsonValue
-from storysurfer.errors import ConfigurationError, SpeechError
+from storysurfer.errors import AlignmentError, ConfigurationError, SpeechError
+from storysurfer.speech.alignment import normalize_segment_speech, validate_segment_speech
 from storysurfer.speech.base import RelativeWord, SegmentSpeech
 
+MAX_EDGE_CHUNK_CHARS = 1_000
+MAX_EDGE_WORD_DURATION_MS = 10_000
+FALLBACK_EDGE_WORD_DURATION_MS = 500
+MAX_EDGE_CHUNK_ATTEMPTS = 3
 TICKS_PER_MILLISECOND = 10_000
 StreamFactory = Callable[[str, SpeechConfig], Iterable[object]]
 Mp3Decoder = Callable[[bytes, int], bytes]
@@ -68,6 +73,37 @@ class EdgeTTSSpeechProvider:
     def synthesize(self, text: str) -> SegmentSpeech:
         if not text.strip():
             raise SpeechError("Cannot synthesize an empty narration segment.")
+        pcm = bytearray()
+        words: list[RelativeWord] = []
+        for chunk in _text_chunks(text):
+            chunk_speech = self._synthesize_chunk(chunk)
+            offset_ms = round(len(pcm) / 2 / self._config.sample_rate * 1_000)
+            words.extend(
+                RelativeWord(
+                    text=word.text,
+                    start_ms=offset_ms + word.start_ms,
+                    end_ms=offset_ms + word.end_ms,
+                )
+                for word in chunk_speech.words
+            )
+            pcm.extend(chunk_speech.pcm_s16le)
+        return SegmentSpeech(
+            pcm_s16le=bytes(pcm),
+            sample_rate=self._config.sample_rate,
+            words=tuple(words),
+        )
+
+    def _synthesize_chunk(self, text: str) -> SegmentSpeech:
+        alignment_error: AlignmentError | None = None
+        for _attempt in range(MAX_EDGE_CHUNK_ATTEMPTS):
+            try:
+                return self._stream_chunk(text)
+            except AlignmentError as exc:
+                alignment_error = exc
+        assert alignment_error is not None
+        raise alignment_error
+
+    def _stream_chunk(self, text: str) -> SegmentSpeech:
         mp3 = bytearray()
         words: list[RelativeWord] = []
         try:
@@ -99,11 +135,61 @@ class EdgeTTSSpeechProvider:
             pcm = self._mp3_decoder(bytes(mp3), self._config.sample_rate)
         except miniaudio.DecodeError as exc:
             raise SpeechError("Edge TTS MP3 audio could not be decoded.") from exc
-        return SegmentSpeech(
-            pcm_s16le=pcm,
-            sample_rate=self._config.sample_rate,
-            words=tuple(words),
+        speech = normalize_segment_speech(
+            SegmentSpeech(
+                pcm_s16le=pcm,
+                sample_rate=self._config.sample_rate,
+                words=tuple(_normalize_edge_words(words, len(pcm) // 2, self._config.sample_rate)),
+            )
         )
+        validate_segment_speech(speech)
+        return speech
+
+
+def _normalize_edge_words(
+    words: list[RelativeWord], pcm_frames: int, sample_rate: int
+) -> list[RelativeWord]:
+    """Repair impossible per-word durations while preserving valid timing."""
+    audio_duration_ms = round(pcm_frames / sample_rate * 1_000)
+    normalized: list[RelativeWord] = []
+    for index, word in enumerate(words):
+        if word.end_ms - word.start_ms <= MAX_EDGE_WORD_DURATION_MS:
+            normalized.append(word)
+            continue
+        next_start = words[index + 1].start_ms if index + 1 < len(words) else audio_duration_ms
+        fallback_end = min(
+            word.start_ms + FALLBACK_EDGE_WORD_DURATION_MS,
+            next_start,
+            audio_duration_ms,
+        )
+        if fallback_end <= word.start_ms:
+            normalized.append(word)
+            continue
+        normalized.append(RelativeWord(text=word.text, start_ms=word.start_ms, end_ms=fallback_end))
+    return normalized
+
+
+def _text_chunks(text: str, maximum: int = MAX_EDGE_CHUNK_CHARS) -> tuple[str, ...]:
+    """Split long narration at natural boundaries without dropping spoken text."""
+    remaining = text.strip()
+    chunks: list[str] = []
+    while len(remaining) > maximum:
+        window = remaining[: maximum + 1]
+        sentence_ends = [
+            index + 1
+            for index, character in enumerate(window)
+            if character in ".!?" and index + 1 < len(window) and window[index + 1].isspace()
+        ]
+        boundary = sentence_ends[-1] if sentence_ends else 0
+        if boundary < maximum // 2:
+            boundary = window.rfind(" ", 0, maximum + 1)
+        if boundary <= 0:
+            boundary = maximum
+        chunks.append(remaining[:boundary].strip())
+        remaining = remaining[boundary:].strip()
+    if remaining:
+        chunks.append(remaining)
+    return tuple(chunks)
 
 
 def _edge_stream(text: str, config: SpeechConfig) -> Iterable[object]:

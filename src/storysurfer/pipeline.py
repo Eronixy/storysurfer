@@ -21,7 +21,7 @@ from storysurfer.domain import (
     VerificationReport,
 )
 from storysurfer.editorial import select_thread
-from storysurfer.editorial.clean import clean_for_speech
+from storysurfer.editorial.clean import SPEECH_CLEANER_VERSION, clean_for_speech
 from storysurfer.editorial.script import build_narration_script, render_script_report
 from storysurfer.errors import (
     ConfigurationError,
@@ -123,9 +123,7 @@ def ingest_snapshot(
     storage.set_stage(created_run_id, "ingest", "running", input_hash=input_hash)
     try:
         storage.write_thread(created_run_id, snapshot)
-        storage.set_stage(
-            created_run_id, "ingest", "completed", input_hash=input_hash
-        )
+        storage.set_stage(created_run_id, "ingest", "completed", input_hash=input_hash)
     except StorySurferError as exc:
         storage.set_stage(
             created_run_id,
@@ -161,9 +159,7 @@ def ingest_existing(
         return storage.read_thread(run_id)
     statuses = storage.stage_statuses(run_id)
     if statuses.get("ingest") == "completed":
-        raise StorageError(
-            "A completed web run cannot be repointed to a different Reddit source."
-        )
+        raise StorageError("A completed web run cannot be repointed to a different Reddit source.")
     storage.set_stage(run_id, "ingest", "running", input_hash=input_hash)
     try:
         factory = source_factory or _praw_source
@@ -199,9 +195,7 @@ def revise_selection(
     known_ids = {candidate.id for candidate in current.candidates}
     unknown = selected_candidate_ids - known_ids
     if unknown:
-        raise SelectionError(
-            f"Selection contains unknown candidates: {', '.join(sorted(unknown))}"
-        )
+        raise SelectionError(f"Selection contains unknown candidates: {', '.join(sorted(unknown))}")
     candidates = tuple(
         replace(candidate, selected=candidate.id in selected_candidate_ids)
         for candidate in current.candidates
@@ -212,9 +206,7 @@ def revise_selection(
         selected_comment_words=sum(
             candidate.word_count for candidate in candidates if candidate.selected
         ),
-        warnings=tuple(
-            dict.fromkeys((*current.warnings, "Selection reviewed in the browser."))
-        ),
+        warnings=tuple(dict.fromkeys((*current.warnings, "Selection reviewed in the browser."))),
         manually_edited=True,
     )
     storage.write_selection(run_id, revised)
@@ -267,9 +259,7 @@ def revise_script(
         raise ScriptError("Script edit does not contain every current narration segment.")
     groups = narration_groups(current)
     by_group_id = {group[0].id: group for group in groups}
-    if set(ordered_group_ids) != set(by_group_id) or len(ordered_group_ids) != len(
-        by_group_id
-    ):
+    if set(ordered_group_ids) != set(by_group_id) or len(ordered_group_ids) != len(by_group_id):
         raise ScriptError("Script group order is missing or contains unknown groups.")
     if ordered_group_ids[:2] != tuple(group[0].id for group in groups[:2]):
         raise ScriptError("The title and post must remain at the start of the narration.")
@@ -277,25 +267,22 @@ def revise_script(
     for group_id in ordered_group_ids:
         for segment in by_group_id[group_id]:
             reviewed = _reviewed_text(spoken_text_by_segment[segment.id])
-            cleaned = clean_for_speech(
-                reviewed, pronunciations=config.speech.pronunciations
-            )
+            cleaned = clean_for_speech(reviewed, pronunciations=config.speech.pronunciations)
             if not cleaned.text:
                 raise ScriptError("Narration segments cannot be empty after redaction.")
             ordered_segments_list.append(
                 replace(
                     segment,
                     spoken_text=cleaned.text,
-                    redactions=tuple(
-                        sorted(set((*segment.redactions, *cleaned.redactions)))
-                    ),
+                    redactions=tuple(sorted(set((*segment.redactions, *cleaned.redactions)))),
                 )
             )
     ordered_segments = tuple(ordered_segments_list)
     estimated_words = sum(len(segment.spoken_text.split()) for segment in ordered_segments)
-    estimated_duration_ms = round(
-        estimated_words / config.selection.words_per_minute * 60_000
-    ) + max(0, len(ordered_segments) - 1) * config.speech.segment_pause_ms
+    estimated_duration_ms = (
+        round(estimated_words / config.selection.words_per_minute * 60_000)
+        + max(0, len(ordered_segments) - 1) * config.speech.segment_pause_ms
+    )
     revised = replace(
         current,
         segments=ordered_segments,
@@ -400,13 +387,12 @@ def script_run(run_id: str, config: AppConfig, storage: RunStorage) -> Narration
             "thread": snapshot.to_dict(),
             "selection": selection.to_dict(),
             "pronunciations": [list(item) for item in config.speech.pronunciations],
+            "speech_cleaner_version": SPEECH_CLEANER_VERSION,
             "words_per_minute": config.selection.words_per_minute,
             "segment_pause_ms": config.speech.segment_pause_ms,
         }
     )
-    if storage.stage_is_current(
-        run_id, "script", input_hash, ("script", "script_report")
-    ):
+    if storage.stage_is_current(run_id, "script", input_hash, ("script", "script_report")):
         return storage.read_script(run_id)
     storage.set_stage(run_id, "script", "running", input_hash=input_hash)
     try:
@@ -458,9 +444,7 @@ def narrate(
     input_hash = json_hash(
         {"script_content_hash": _script_content_hash(script), "speech": speech_public}
     )
-    if storage.stage_is_current(
-        run_id, "synthesize", input_hash, ("speech", "narration_audio")
-    ):
+    if storage.stage_is_current(run_id, "synthesize", input_hash, ("speech", "narration_audio")):
         return storage.read_speech(run_id)
     storage.set_stage(run_id, "synthesize", "running", input_hash=input_hash)
     try:
@@ -544,9 +528,7 @@ def caption_run(
             reason="Caption timing or style changed; regenerate downstream artifacts.",
         )
     except StorySurferError as exc:
-        storage.set_stage(
-            run_id, "caption", "failed", message=exc.message, input_hash=input_hash
-        )
+        storage.set_stage(run_id, "caption", "failed", message=exc.message, input_hash=input_hash)
         raise
     except Exception:
         storage.set_stage(
@@ -646,9 +628,7 @@ def render_run(
             "media": _render_settings(effective_media),
         }
     )
-    if storage.stage_is_current(
-        run_id, stage, input_hash, (timeline_key, profile)
-    ):
+    if storage.stage_is_current(run_id, stage, input_hash, (timeline_key, profile)):
         return storage.read_timeline(run_id, name=timeline_name)
     storage.set_stage(run_id, stage, "running", input_hash=input_hash)
     try:
@@ -669,9 +649,7 @@ def render_run(
             artifact_key=timeline_key,
         )
         selected_renderer = renderer or _render_video
-        selected_renderer(
-            storage.run_dir(run_id), timeline, effective_media, output_name
-        )
+        selected_renderer(storage.run_dir(run_id), timeline, effective_media, output_name)
         storage.record_artifact(run_id, profile, output_name)
         storage.set_stage(run_id, stage, "completed", input_hash=input_hash)
         storage.mark_stages_stale(
@@ -680,9 +658,7 @@ def render_run(
             reason=f"{profile.title()} video changed; verify it again.",
         )
     except StorySurferError as exc:
-        storage.set_stage(
-            run_id, stage, "failed", message=exc.message, input_hash=input_hash
-        )
+        storage.set_stage(run_id, stage, "failed", message=exc.message, input_hash=input_hash)
         raise
     except Exception:
         storage.set_stage(
@@ -725,9 +701,10 @@ def verify(
         timeline_key,
         profile,
     )
-    artifact_integrity = storage.artifacts_are_current(
-        run_id, required_artifacts
-    ) and storage.stage_statuses(run_id).get(f"render_{profile}") == "completed"
+    artifact_integrity = (
+        storage.artifacts_are_current(run_id, required_artifacts)
+        and storage.stage_statuses(run_id).get(f"render_{profile}") == "completed"
+    )
     input_hash = json_hash(
         {
             "timeline": timeline.to_dict(),
@@ -749,9 +726,7 @@ def verify(
             profile=profile,
             artifact_integrity=artifact_integrity,
         )
-        storage.write_verification(
-            run_id, report, name=report_name, artifact_key=report_key
-        )
+        storage.write_verification(run_id, report, name=report_name, artifact_key=report_key)
         if not report.passed:
             failed = ", ".join(check.name for check in report.checks if not check.passed)
             raise VerificationError(
@@ -761,9 +736,7 @@ def verify(
         storage.set_stage(run_id, stage, "completed", input_hash=input_hash)
         return report
     except StorySurferError as exc:
-        storage.set_stage(
-            run_id, stage, "failed", message=exc.message, input_hash=input_hash
-        )
+        storage.set_stage(run_id, stage, "failed", message=exc.message, input_hash=input_hash)
         raise
     except Exception:
         storage.set_stage(
@@ -811,9 +784,7 @@ def build(
         run_id, _ = ingest_snapshot(cached_thread, config, storage)
     else:
         assert source_value is not None
-        run_id, _ = ingest(
-            source_value, config, storage, source_factory=source_factory
-        )
+        run_id, _ = ingest(source_value, config, storage, source_factory=source_factory)
 
     try:
         select(run_id, config, storage)

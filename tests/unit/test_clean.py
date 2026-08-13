@@ -27,3 +27,30 @@ def test_sentence_extract_never_cuts_a_sentence() -> None:
 
     assert extracted.text == "First complete sentence here."
     assert extracted.shortened
+
+
+def test_cleanup_removes_emojis_and_reddit_markdown_without_losing_words() -> None:
+    cleaned = clean_for_speech(
+        "# Story\n"
+        "> Quoted context\n"
+        "- First item\n"
+        r"Siguro mas maganda si \**toot\** kaysa sayo. "
+        ">!spoiler text!< ||hidden text|| "
+        "Eme🤣 Naging trophy💀 Family 👨‍👩‍👧‍👦 "
+        "![photo](https://example.com/photo.jpg)"
+    )
+
+    assert cleaned.text == (
+        "Story Quoted context First item Siguro mas maganda si toot kaysa sayo. "
+        "spoiler text hidden text Eme Naging trophy Family photo"
+    )
+    assert "🤣" not in cleaned.text
+    assert "💀" not in cleaned.text
+    assert "\\" not in cleaned.text
+    assert not any(token in cleaned.text for token in ("**", ">!", "!<", "||", "!["))
+
+
+def test_cleanup_removes_orphaned_markdown_escapes_from_legacy_scripts() -> None:
+    cleaned = clean_for_speech(r"mas maganda si \\ toot\\ kaysa sayo")
+
+    assert cleaned.text == "mas maganda si toot kaysa sayo"

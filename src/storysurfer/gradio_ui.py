@@ -27,7 +27,7 @@ from storysurfer.reddit.url import parse_reddit_reference
 from storysurfer.speech.voices import (
     EdgeVoice,
     fetch_edge_voices,
-    language_choices,
+    language_choices_for_voice,
     locale_for_voice,
     voice_choices,
 )
@@ -210,13 +210,10 @@ def _build_ui(
         sessions.verify(token, request.session_hash)
 
     def voice_controls(selected: str) -> tuple[Any, Any]:
-        locale = locale_for_voice(voice_catalog, selected)
+        language_options, locale = language_choices_for_voice(voice_catalog, selected)
         choices, value = voice_choices(voice_catalog, locale, selected=selected)
-        if selected and value != selected:
-            choices.append((selected, selected))
-            value = selected
         return (
-            gr.Dropdown(choices=language_choices(voice_catalog), value=locale),
+            gr.Dropdown(choices=language_options, value=locale),
             gr.Dropdown(choices=choices, value=value),
         )
 
@@ -324,7 +321,7 @@ def _build_ui(
                         step=10,
                         label="Caption bottom margin",
                     )
-                crop = gr.Slider(-1, 1, 0, step=.05, label="Gameplay crop offset")
+                crop = gr.Slider(-1, 1, 0, step=0.05, label="Gameplay crop offset")
                 audio = gr.Checkbox(False, label="Keep and duck licensed gameplay audio")
                 save_style = gr.Button("Save style")
                 with gr.Row():
@@ -347,9 +344,11 @@ def _build_ui(
 
         def initialize(request: gr.Request) -> tuple[str, Any, list[list[str | int]]]:
             choices = run_choices()
-            return issue(request), gr.Dropdown(
-                choices=choices, value=choices[0] if choices else None
-            ), dashboard_rows()
+            return (
+                issue(request),
+                gr.Dropdown(choices=choices, value=choices[0] if choices else None),
+                dashboard_rows(),
+            )
 
         async def load_voice_catalog() -> tuple[Any, Any, Any, Any, str]:
             nonlocal voice_catalog
@@ -359,8 +358,8 @@ def _build_ui(
                 return (
                     language_control,
                     voice_control,
-                    language_control,
-                    voice_control,
+                    gr.skip(),
+                    gr.skip(),
                     _ok(f"Loaded {len(voice_catalog)} Edge TTS voices."),
                 )
             except StorySurferError as exc:
@@ -368,8 +367,8 @@ def _build_ui(
                 return (
                     language_control,
                     voice_control,
-                    language_control,
-                    voice_control,
+                    gr.skip(),
+                    gr.skip(),
                     _error(exc),
                 )
 
@@ -414,13 +413,9 @@ def _build_ui(
                 run_id = storage.create_run(project.apply(config).public_dict())
                 storage.set_stage(run_id, "upload", "running")
                 try:
-                    target = storage.internal_path(
-                        run_id, project.staging_path, create_parent=True
-                    )
+                    target = storage.internal_path(run_id, project.staging_path, create_parent=True)
                     _copy_upload(source_path, target, config.web.upload_limit_bytes)
-                    storage.record_artifact(
-                        run_id, "background_staging", project.staging_path
-                    )
+                    storage.record_artifact(run_id, "background_staging", project.staging_path)
                     projects.write(run_id, project)
                     storage.set_stage(
                         run_id,
@@ -428,9 +423,7 @@ def _build_ui(
                         "queued",
                         message="Upload staged for worker-side media validation.",
                     )
-                    job = jobs.enqueue(
-                        run_id, "prepare", projects.job_key(run_id, "prepare")
-                    )
+                    job = jobs.enqueue(run_id, "prepare", projects.job_key(run_id, "prepare"))
                 except Exception:
                     storage.set_stage(
                         run_id,
@@ -440,9 +433,11 @@ def _build_ui(
                     )
                     raise
                 worker.wake()
-                return _ok(f"Created {run_id}; {job.message}"), gr.Dropdown(
-                    choices=run_choices(), value=run_id
-                ), dashboard_rows()
+                return (
+                    _ok(f"Created {run_id}; {job.message}"),
+                    gr.Dropdown(choices=run_choices(), value=run_id),
+                    dashboard_rows(),
+                )
             except (StorySurferError, OSError, ValueError) as exc:
                 return _error(exc), gr.Dropdown(), dashboard_rows()
 
@@ -458,10 +453,19 @@ def _build_ui(
                     choices.append((item.kind.replace("_", " "), item.id))
                     context = "\n".join(
                         f"{'OP' if comments[key].is_op else 'Commenter'}: {comments[key].body}"
-                        for key in item.source_ids if key in comments
+                        for key in item.source_ids
+                        if key in comments
                     )
-                    rows.append([item.id, item.selected, item.kind, item.score, context,
-                                 ", ".join(item.reason_codes)])
+                    rows.append(
+                        [
+                            item.id,
+                            item.selected,
+                            item.kind,
+                            item.score,
+                            context,
+                            ", ".join(item.reason_codes),
+                        ]
+                    )
                     if item.selected:
                         selected.append(item.id)
                 project = projects.read(chosen)
@@ -520,16 +524,27 @@ def _build_ui(
                 return rows or [], _error(exc)
 
         def style(
-            token: str, run_id: str | None, selected_voice: str, offset: float,
-            retain_audio: bool, highlight: str, bottom: float, request: gr.Request,
+            token: str,
+            run_id: str | None,
+            selected_voice: str,
+            offset: float,
+            retain_audio: bool,
+            highlight: str,
+            bottom: float,
+            request: gr.Request,
         ) -> str:
             try:
                 verify(token, request)
                 chosen, current = _run_id(run_id), projects.read(_run_id(run_id))
                 project = ProjectSettings.from_dict(
-                    {**current.to_dict(), "voice": selected_voice, "crop_offset": offset,
-                     "retain_background_audio": retain_audio,
-                     "highlight_color": highlight, "margin_bottom": int(bottom)}
+                    {
+                        **current.to_dict(),
+                        "voice": selected_voice,
+                        "crop_offset": offset,
+                        "retain_background_audio": retain_audio,
+                        "highlight_color": highlight,
+                        "margin_bottom": int(bottom),
+                    }
                 )
                 projects.write(chosen, project)
                 stale: tuple[str, ...]
@@ -570,7 +585,10 @@ def _build_ui(
                 return _error(exc)
 
         def enqueue(
-            token: str, run_id: str | None, kind: str, acknowledged: bool,
+            token: str,
+            run_id: str | None,
+            kind: str,
+            acknowledged: bool,
             request: gr.Request,
         ) -> str:
             try:
@@ -621,8 +639,11 @@ def _build_ui(
         def downloads(run_id: str | None) -> tuple[list[str], str]:
             chosen = _run_id(run_id)
             paths = [str(write_public_manifest(chosen, storage))]
-            paths += [str(path) for name in sorted(ARTIFACT_ALLOWLIST)
-                      if (path := storage.artifact_path(chosen, name)).is_file()]
+            paths += [
+                str(path)
+                for name in sorted(ARTIFACT_ALLOWLIST)
+                if (path := storage.artifact_path(chosen, name)).is_file()
+            ]
             return paths, _ok(f"Loaded {len(paths)} public artifact(s).")
 
         demo.load(
@@ -637,14 +658,14 @@ def _build_ui(
             queue=False,
             api_visibility="private",
         )
-        create_language.change(
+        create_language.input(
             filter_voices,
             [create_language, voice],
             voice,
             queue=False,
             api_visibility="private",
         )
-        style_language.change(
+        style_language.input(
             filter_voices,
             [style_language, style_voice],
             style_voice,
@@ -657,8 +678,12 @@ def _build_ui(
             queue=False,
             api_visibility="private",
         )
-        create.click(create_project, [csrf, url, upload, preset, duration, voice],
-                     [status, run, dashboard], api_visibility="private")
+        create.click(
+            create_project,
+            [csrf, url, upload, preset, duration, voice],
+            [status, run, dashboard],
+            api_visibility="private",
+        )
         load_review.click(
             review,
             run,
@@ -687,16 +712,24 @@ def _build_ui(
             [script, status],
             api_visibility="private",
         )
-        save_style.click(style, [csrf, run, style_voice, crop, audio, color, margin],
-                         status, api_visibility="private")
+        save_style.click(
+            style,
+            [csrf, run, style_voice, crop, audio, color, margin],
+            status,
+            api_visibility="private",
+        )
         preview.click(preview_job, [csrf, run], status, api_visibility="private")
         final.click(final_job, [csrf, run, rights], status, api_visibility="private")
         cancel.click(cancel_job, [csrf, run], status, api_visibility="private")
-        timer.tick(poll, run, [status, progress, preview_video, final_video], queue=False,
-                   trigger_mode="always_last", api_visibility="private")
-        load_artifacts.click(
-            downloads, run, [artifacts, status], api_visibility="private"
+        timer.tick(
+            poll,
+            run,
+            [status, progress, preview_video, final_video],
+            queue=False,
+            trigger_mode="always_last",
+            api_visibility="private",
         )
+        load_artifacts.click(downloads, run, [artifacts, status], api_visibility="private")
     return cast(gr.Blocks, demo)
 
 
@@ -719,9 +752,12 @@ def _copy_upload(source: Path, target: Path, maximum: int) -> None:
     copied = 0
     temporary: Path | None = None
     try:
-        with source.open("rb") as input_file, tempfile.NamedTemporaryFile(
-            "wb", dir=target.parent, prefix=f".{target.name}.", delete=False
-        ) as output_file:
+        with (
+            source.open("rb") as input_file,
+            tempfile.NamedTemporaryFile(
+                "wb", dir=target.parent, prefix=f".{target.name}.", delete=False
+            ) as output_file,
+        ):
             temporary = Path(output_file.name)
             while chunk := input_file.read(1024 * 1024):
                 copied += len(chunk)
@@ -737,10 +773,11 @@ def _copy_upload(source: Path, target: Path, maximum: int) -> None:
 
 
 def _script_rows(script: Any) -> list[list[str]]:
-    groups = {segment.id: group[0].id
-              for group in narration_groups(script) for segment in group}
-    return [[groups[item.id], item.id, item.speaker_label, item.spoken_text,
-             item.original_excerpt] for item in script.segments]
+    groups = {segment.id: group[0].id for group in narration_groups(script) for segment in group}
+    return [
+        [groups[item.id], item.id, item.speaker_label, item.spoken_text, item.original_excerpt]
+        for item in script.segments
+    ]
 
 
 def _ok(message: str) -> str:
@@ -748,6 +785,8 @@ def _ok(message: str) -> str:
 
 
 def _error(exc: Exception) -> str:
-    return f"**Could not complete the action:** {exc.display()}" if isinstance(
-        exc, StorySurferError
-    ) else "**Could not complete the action:** Invalid input."
+    return (
+        f"**Could not complete the action:** {exc.display()}"
+        if isinstance(exc, StorySurferError)
+        else "**Could not complete the action:** Invalid input."
+    )

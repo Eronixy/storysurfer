@@ -88,6 +88,18 @@ def language_choices(voices: Sequence[EdgeVoice]) -> list[tuple[str, str]]:
     return sorted(((label, locale) for locale, label in labels.items()), key=lambda item: item[0])
 
 
+def language_choices_for_voice(
+    voices: Sequence[EdgeVoice], name: str
+) -> tuple[list[tuple[str, str]], str]:
+    """Include a saved voice's locale even before the live catalog is available."""
+    locale = locale_for_voice(voices, name)
+    choices = language_choices(voices)
+    if locale not in {value for _label, value in choices}:
+        choices.append((locale, locale))
+        choices.sort(key=lambda item: item[0])
+    return choices, locale
+
+
 def voice_choices(
     voices: Sequence[EdgeVoice], locale: str, *, selected: str | None = None
 ) -> tuple[list[tuple[str, str]], str | None]:
@@ -95,7 +107,14 @@ def voice_choices(
     matching = [voice for voice in voices if voice.locale == locale]
     choices = [(voice.label, voice.name) for voice in matching]
     names = {voice.name for voice in matching}
-    value = selected if selected in names else (matching[0].name if matching else None)
+    value: str | None
+    if selected in names:
+        value = selected
+    elif selected and locale_for_voice(voices, selected) == locale:
+        choices.append((selected, selected))
+        value = selected
+    else:
+        value = matching[0].name if matching else None
     return choices, value
 
 

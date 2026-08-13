@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from storysurfer.config import SpeechConfig
 from storysurfer.speech.alignment import validate_segment_speech
-from storysurfer.speech.edge import EdgeTTSSpeechProvider
+from storysurfer.speech.edge import EdgeTTSSpeechProvider, _text_chunks
 
 
 def test_edge_stream_is_normalized_to_pcm_words() -> None:
@@ -125,4 +125,107 @@ def test_zero_duration_nonspoken_boundary_is_ignored() -> None:
     speech = provider.synthesize("🤣 maganda")
 
     assert [word.text for word in speech.words] == ["maganda"]
+    validate_segment_speech(speech)
+
+
+def test_long_narration_is_chunked_with_monotonic_timing() -> None:
+    calls: list[str] = []
+    pcm = b"\x00\x00" * 24_000
+
+    def stream(text: str, _config: SpeechConfig):
+        calls.append(text)
+        return iter(
+            [
+                {"type": "audio", "data": b"mp3"},
+                {
+                    "type": "WordBoundary",
+                    "offset": 0,
+                    "duration": 1_000_000,
+                    "text": text.split()[0],
+                },
+            ]
+        )
+
+    provider = EdgeTTSSpeechProvider(
+        SpeechConfig(voice="fil-PH-AngeloNeural"),
+        stream_factory=stream,
+        mp3_decoder=lambda _value, _rate: pcm,
+    )
+    text = " ".join(f"Sentence {index}." for index in range(120))
+
+    speech = provider.synthesize(text)
+
+    assert calls == list(_text_chunks(text))
+    assert len(calls) > 1
+    assert all(len(chunk) <= 1_000 for chunk in calls)
+    assert " ".join(calls) == text
+    assert [word.start_ms for word in speech.words] == [
+        index * 1_000 for index in range(len(calls))
+    ]
+    validate_segment_speech(speech)
+
+
+def test_transient_chunk_alignment_is_retried_in_place() -> None:
+    calls = 0
+    pcm = b"\x00\x00" * 24_000
+
+    def stream(_text: str, _config: SpeechConfig):
+        nonlocal calls
+        calls += 1
+        duration = 2_010_000 if calls < 3 else 1_000_000
+        return iter(
+            [
+                {"type": "audio", "data": b"mp3"},
+                {
+                    "type": "WordBoundary",
+                    "offset": 9_000_000,
+                    "duration": duration,
+                    "text": "salita",
+                },
+            ]
+        )
+
+    provider = EdgeTTSSpeechProvider(
+        SpeechConfig(voice="fil-PH-AngeloNeural"),
+        stream_factory=stream,
+        mp3_decoder=lambda _value, _rate: pcm,
+    )
+
+    speech = provider.synthesize("salita")
+
+    assert calls == 3
+    assert speech.words[-1].end_ms == 1_000
+    validate_segment_speech(speech)
+
+
+def test_impossible_trailing_word_duration_is_repaired() -> None:
+    calls = 0
+    pcm = b"\x00\x00" * 24_000
+
+    def stream(_text: str, _config: SpeechConfig):
+        nonlocal calls
+        calls += 1
+        return iter(
+            [
+                {"type": "audio", "data": b"mp3"},
+                {
+                    "type": "WordBoundary",
+                    "offset": 1_000_000,
+                    "duration": 894_784_478_330,
+                    "text": "Eme",
+                },
+            ]
+        )
+
+    provider = EdgeTTSSpeechProvider(
+        SpeechConfig(voice="fil-PH-BlessicaNeural"),
+        stream_factory=stream,
+        mp3_decoder=lambda _value, _rate: pcm,
+    )
+
+    speech = provider.synthesize("Eme🤣")
+
+    assert calls == 1
+    assert speech.words[-1].start_ms == 100
+    assert speech.words[-1].end_ms == 600
     validate_segment_speech(speech)

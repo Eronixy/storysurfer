@@ -9,6 +9,7 @@ from storysurfer.errors import AlignmentError
 from storysurfer.speech.base import RelativeWord, SegmentSpeech
 
 NON_WHITESPACE = re.compile(r"\S+")
+MAX_ALIGNMENT_DRIFT_MS = 100
 
 
 def words_from_character_alignment(value: object) -> tuple[RelativeWord, ...]:
@@ -48,6 +49,31 @@ def words_from_character_alignment(value: object) -> tuple[RelativeWord, ...]:
     return tuple(words)
 
 
+def normalize_segment_speech(speech: SegmentSpeech) -> SegmentSpeech:
+    """Clamp harmless final-boundary drift without accepting truncated audio."""
+    if not speech.words:
+        return speech
+    overrun_ms = speech.words[-1].end_ms - speech.duration_ms
+    if overrun_ms <= 0 or overrun_ms > MAX_ALIGNMENT_DRIFT_MS:
+        return speech
+    last_word = speech.words[-1]
+    if speech.duration_ms <= last_word.start_ms:
+        return speech
+    words = (
+        *speech.words[:-1],
+        RelativeWord(
+            text=last_word.text,
+            start_ms=last_word.start_ms,
+            end_ms=speech.duration_ms,
+        ),
+    )
+    return SegmentSpeech(
+        pcm_s16le=speech.pcm_s16le,
+        sample_rate=speech.sample_rate,
+        words=words,
+    )
+
+
 def validate_segment_speech(speech: SegmentSpeech) -> None:
     if speech.sample_rate <= 0:
         raise AlignmentError("Speech sample rate must be positive.")
@@ -64,8 +90,13 @@ def validate_segment_speech(speech: SegmentSpeech) -> None:
         if word.start_ms < previous_end:
             raise AlignmentError("Speech word timings overlap or are not monotonic.")
         previous_end = word.end_ms
-    if speech.words[-1].end_ms > speech.duration_ms + 100:
-        raise AlignmentError("Speech alignment extends beyond the returned audio duration.")
+    if speech.words[-1].end_ms > speech.duration_ms:
+        raise AlignmentError(
+            "Speech alignment extends beyond the returned audio duration: "
+            f"word timing ends at {speech.words[-1].end_ms} ms, audio ends at "
+            f"{speech.duration_ms} ms "
+            f"({speech.words[-1].end_ms - speech.duration_ms} ms overrun)."
+        )
 
 
 def _numbers(values: list[object], label: str) -> list[float]:

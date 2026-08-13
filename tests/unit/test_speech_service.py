@@ -7,7 +7,7 @@ import pytest
 
 from storysurfer.config import SpeechConfig
 from storysurfer.domain import NarrationScript, NarrationSegment, SourceRef
-from storysurfer.errors import SpeechError
+from storysurfer.errors import AlignmentError, SpeechError
 from storysurfer.speech.base import RelativeWord, SegmentSpeech
 from storysurfer.speech.service import synthesize_script
 from storysurfer.speech.wav import decode_wav
@@ -31,8 +31,7 @@ class FakeSpeechProvider:
         duration_ms = len(tokens) * 100
         pcm = b"\x00\x00" * round(duration_ms * 24_000 / 1_000)
         words = tuple(
-            RelativeWord(word, index * 100, (index + 1) * 100)
-            for index, word in enumerate(tokens)
+            RelativeWord(word, index * 100, (index + 1) * 100) for index, word in enumerate(tokens)
         )
         return SegmentSpeech(pcm_s16le=pcm, sample_rate=24_000, words=words)
 
@@ -126,3 +125,56 @@ def test_incomplete_cache_does_not_trigger_an_uncertain_paid_retry(tmp_path: Pat
         synthesize_script(run_id, _script(), provider, config, storage)
 
     assert provider.calls == 0
+
+
+@dataclass
+class FlakyAlignmentProvider:
+    calls: int = 0
+    invalid_attempts: int = 1
+
+    @property
+    def provider_id(self) -> str:
+        return "edge-tts"
+
+    def settings(self) -> dict[str, object]:
+        return {"provider": "edge-tts", "voice": "flaky", "sample_rate": 24_000}
+
+    def synthesize(self, text: str) -> SegmentSpeech:
+        self.calls += 1
+        tokens = text.split()
+        duration_ms = len(tokens) * 100
+        pcm = b"\x00\x00" * round(duration_ms * 24_000 / 1_000)
+        if self.calls <= self.invalid_attempts:
+            return SegmentSpeech(
+                pcm_s16le=pcm,
+                sample_rate=24_000,
+                words=(RelativeWord(tokens[0], 0, duration_ms + 101),),
+            )
+        words = tuple(
+            RelativeWord(word, index * 100, (index + 1) * 100) for index, word in enumerate(tokens)
+        )
+        return SegmentSpeech(pcm_s16le=pcm, sample_rate=24_000, words=words)
+
+
+def test_transient_invalid_alignment_is_retried_before_caching(tmp_path: Path) -> None:
+    storage = RunStorage(tmp_path / "runs")
+    run_id = storage.create_run({}, run_id="alignment-retry-run")
+    provider = FlakyAlignmentProvider()
+    config = SpeechConfig(sample_rate=24_000, segment_pause_ms=100)
+
+    artifact = synthesize_script(run_id, _script(), provider, config, storage)
+
+    assert provider.calls == 3
+    assert artifact.words[-1].end_ms <= artifact.duration_ms
+
+
+def test_persistently_invalid_alignment_stops_after_one_retry(tmp_path: Path) -> None:
+    storage = RunStorage(tmp_path / "runs")
+    run_id = storage.create_run({}, run_id="alignment-failure-run")
+    provider = FlakyAlignmentProvider(invalid_attempts=2)
+    config = SpeechConfig(sample_rate=24_000, segment_pause_ms=100)
+
+    with pytest.raises(AlignmentError, match="extends beyond"):
+        synthesize_script(run_id, _script(), provider, config, storage)
+
+    assert provider.calls == 2
