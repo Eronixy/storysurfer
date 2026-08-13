@@ -1,0 +1,48 @@
+[project]
+name = "redditsurfer"
+version = "0.1.0"
+description = "Build narrated vertical videos from source-linked Reddit stories"
+readme = "README.md"
+authors = [
+    { name = "Eronixy", email = "erroniz21@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "praw>=8.0.2,<9",
+    "pyyaml>=6.0.2,<7",
+]
+
+[project.scripts]
+redditsurfer = "redditsurfer.cli:main"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.17,<2",
+    "pytest>=8.3,<10",
+    "ruff>=0.12,<1",
+    "types-pyyaml>=6.0.12,<7",
+]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["redditsurfer"]
+
+[[tool.mypy.overrides]]
+module = ["praw", "praw.*"]
+ignore_missing_imports = true
+
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13.0"]
+build-backend = "uv_build"

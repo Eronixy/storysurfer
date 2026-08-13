@@ -1,0 +1,22 @@
+reddit:
+  # Credentials are environment-only: REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET.
+  # Use REDDIT_USER_AGENT or replace this non-identifying development value locally.
+  user_agent: "linux:redditsurfer:0.1.0 (development)"
+  comment_sort: "best"
+  max_comments: 250
+  replace_more_limit: 8
+
+selection:
+  target_duration_seconds: 75
+  words_per_minute: 165
+  comment_budget_fraction: 0.25
+  max_comment_depth: 8
+  max_candidate_words: 220
+  max_selected_candidates: 5
+
+storage:
+  runs_dir: "runs"
+
+media:
+  ffmpeg_path: "ffmpeg"
+  ffprobe_path: "ffprobe"

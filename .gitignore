@@ -1,0 +1,36 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Local configuration and credentials
+.env
+config.yaml
+config.yml
+
+# Runtime and generated media
+runs/
+uploads/
+*.mp3
+*.wav
+*.mp4
+*.mov
+*.mkv
+*.ass
+*.srt
+
+# Tool caches and reports
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+coverage.xml
+htmlcov/
+
+# md Files
+.md
