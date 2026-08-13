@@ -8,6 +8,8 @@ authors = [
 ]
 requires-python = ">=3.11"
 dependencies = [
+    "edge-tts>=7.2.8,<8",
+    "miniaudio>=1.60,<2",
     "praw>=8.0.2,<9",
     "pyyaml>=6.0.2,<7",
 ]
@@ -41,6 +43,10 @@ packages = ["redditsurfer"]
 
 [[tool.mypy.overrides]]
 module = ["praw", "praw.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["edge_tts", "edge_tts.*", "miniaudio"]
 ignore_missing_imports = true
 
 [build-system]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -86,11 +87,30 @@ class MediaConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class SpeechConfig:
+    provider: str = "edge-tts"
+    voice: str = "en-US-EmmaMultilingualNeural"
+    rate: str = "+0%"
+    volume: str = "+0%"
+    pitch: str = "+0Hz"
+    sample_rate: int = 24_000
+    segment_pause_ms: int = 350
+    connect_timeout_seconds: int = 10
+    receive_timeout_seconds: int = 60
+    pronunciations: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.voice)
+
+
+@dataclass(frozen=True, slots=True)
 class AppConfig:
     reddit: RedditConfig
     selection: SelectionConfig
     storage: StorageConfig
     media: MediaConfig
+    speech: SpeechConfig = SpeechConfig()
 
     def public_dict(self) -> dict[str, JsonValue]:
         return {
@@ -113,6 +133,19 @@ class AppConfig:
             "media": {
                 "ffmpeg_path": self.media.ffmpeg_path,
                 "ffprobe_path": self.media.ffprobe_path,
+            },
+            "speech": {
+                "provider": self.speech.provider,
+                "configured": self.speech.configured,
+                "voice": self.speech.voice,
+                "rate": self.speech.rate,
+                "volume": self.speech.volume,
+                "pitch": self.speech.pitch,
+                "sample_rate": self.speech.sample_rate,
+                "segment_pause_ms": self.speech.segment_pause_ms,
+                "connect_timeout_seconds": self.speech.connect_timeout_seconds,
+                "receive_timeout_seconds": self.speech.receive_timeout_seconds,
+                "pronunciations": [list(item) for item in self.speech.pronunciations],
             },
         }
 
@@ -198,6 +231,27 @@ def load_config(
 
     storage_data = _section(raw, "storage")
     media_data = _section(raw, "media")
+    speech_data = _section(raw, "speech")
+    legacy_speech_keys = {
+        "api_key",
+        "voice_id",
+        "model_id",
+        "request_timeout_seconds",
+        "stability",
+        "similarity_boost",
+        "style",
+        "use_speaker_boost",
+    }.intersection(speech_data)
+    if legacy_speech_keys:
+        names = ", ".join(sorted(legacy_speech_keys))
+        raise ConfigurationError(
+            f"Obsolete ElevenLabs speech settings are present: {names}",
+            hint="Use the Edge TTS voice, rate, volume, pitch, and timeout settings.",
+        )
+    provider = _string(speech_data, "provider", "edge-tts").lower().replace("_", "-")
+    if provider != "edge-tts":
+        raise ConfigurationError(f"Unsupported speech provider: {provider}")
+    pronunciations = _pronunciations(speech_data.get("pronunciations", {}))
     return AppConfig(
         reddit=reddit,
         selection=selection,
@@ -206,4 +260,47 @@ def load_config(
             ffmpeg_path=_string(media_data, "ffmpeg_path", "ffmpeg"),
             ffprobe_path=_string(media_data, "ffprobe_path", "ffprobe"),
         ),
+        speech=SpeechConfig(
+            provider=provider,
+            voice=_string(speech_data, "voice", "en-US-EmmaMultilingualNeural"),
+            rate=_speech_modifier(speech_data, "rate", "+0%", "%"),
+            volume=_speech_modifier(speech_data, "volume", "+0%", "%"),
+            pitch=_speech_modifier(speech_data, "pitch", "+0Hz", "Hz"),
+            sample_rate=24_000,
+            segment_pause_ms=_integer(
+                speech_data, "segment_pause_ms", 350, minimum=0, maximum=5_000
+            ),
+            connect_timeout_seconds=_integer(
+                speech_data, "connect_timeout_seconds", 10, minimum=1, maximum=120
+            ),
+            receive_timeout_seconds=_integer(
+                speech_data, "receive_timeout_seconds", 60, minimum=5, maximum=300
+            ),
+            pronunciations=pronunciations,
+        ),
     )
+
+
+def _speech_modifier(
+    data: Mapping[str, object], key: str, default: str, suffix: str
+) -> str:
+    value = _string(data, key, default)
+    pattern = rf"^[+-]\d+{re.escape(suffix)}$"
+    if not re.fullmatch(pattern, value):
+        raise ConfigurationError(
+            f"speech.{key} must use Edge TTS syntax such as {default!r}."
+        )
+    return value
+
+
+def _pronunciations(value: object) -> tuple[tuple[str, str], ...]:
+    if not isinstance(value, dict):
+        raise ConfigurationError("speech.pronunciations must be a mapping.")
+    result: list[tuple[str, str]] = []
+    for source, spoken in value.items():
+        if not isinstance(source, str) or not source.strip():
+            raise ConfigurationError("Pronunciation source values must be non-empty strings.")
+        if not isinstance(spoken, str) or not spoken.strip():
+            raise ConfigurationError("Pronunciation replacements must be non-empty strings.")
+        result.append((source.strip(), spoken.strip()))
+    return tuple(sorted(result, key=lambda item: item[0].casefold()))

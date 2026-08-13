@@ -37,6 +37,24 @@ def test_yaml_secrets_are_rejected(tmp_path: Path) -> None:
         load_config(config_path, environ={})
 
 
+def test_obsolete_elevenlabs_config_is_rejected(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "speech:\n  provider: elevenlabs\n  api_key: obsolete\n", encoding="utf-8"
+    )
+
+    with pytest.raises(ConfigurationError, match="Obsolete ElevenLabs"):
+        load_config(config_path, environ={})
+
+
+def test_edge_speech_modifiers_are_validated(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("speech:\n  rate: fast\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="Edge TTS syntax"):
+        load_config(config_path, environ={})
+
+
 def test_invalid_fraction_is_rejected(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(

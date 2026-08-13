@@ -10,7 +10,7 @@ from pathlib import Path
 from redditsurfer.config import AppConfig, load_config
 from redditsurfer.errors import RedditSurferError
 from redditsurfer.media.capabilities import check_media_capabilities
-from redditsurfer.pipeline import ingest, select
+from redditsurfer.pipeline import ingest, narrate, script_run, select
 from redditsurfer.storage import RunStorage
 
 
@@ -32,6 +32,16 @@ def build_parser() -> argparse.ArgumentParser:
     select_parser = subparsers.add_parser("select", help="rank and select story comments")
     select_parser.add_argument("run_id", help="existing run ID")
     _add_config_argument(select_parser)
+
+    script_parser = subparsers.add_parser("script", help="create a source-linked narration script")
+    script_parser.add_argument("run_id", help="existing run ID")
+    _add_config_argument(script_parser)
+
+    narrate_parser = subparsers.add_parser(
+        "narrate", help="synthesize narration audio and word timestamps"
+    )
+    narrate_parser.add_argument("run_id", help="existing run ID")
+    _add_config_argument(narrate_parser)
     return parser
 
 
@@ -67,6 +77,27 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(f"Warning: {warning}")
             print(f"Artifact: {storage.artifact_path(arguments.run_id, 'selection.json')}")
             return 0
+        if arguments.command == "script":
+            script = script_run(arguments.run_id, config, storage)
+            print(f"Run: {arguments.run_id}")
+            print(
+                f"Created {len(script.segments)} source-linked segments; "
+                f"estimated duration {script.estimated_duration_ms / 1000:.1f}s"
+            )
+            report_path = storage.artifact_path(arguments.run_id, "script.txt")
+            print(f"Review before network synthesis: {report_path}")
+            print(f"Next: uv run redditsurfer narrate {arguments.run_id}")
+            return 0
+        if arguments.command == "narrate":
+            speech = narrate(arguments.run_id, config, storage)
+            print(f"Run: {arguments.run_id}")
+            print(
+                f"Created {speech.duration_ms / 1000:.1f}s narration with "
+                f"{len(speech.words)} timed words"
+            )
+            print(f"Audio: {storage.internal_path(arguments.run_id, speech.audio_path)}")
+            print(f"Timing: {storage.artifact_path(arguments.run_id, 'speech.json')}")
+            return 0
     except RedditSurferError as exc:
         print(f"Error: {exc.display()}", file=sys.stderr)
         return exc.exit_code
@@ -84,7 +115,9 @@ def _doctor(config: AppConfig) -> int:
         config.media.ffprobe_path,
     )
     reddit_status = "configured" if config.reddit.credentials_configured else "missing credentials"
+    speech_status = f"voice {config.speech.voice}" if config.speech.configured else "missing voice"
     print(f"Reddit API: {reddit_status}")
+    print(f"Speech provider ({config.speech.provider}): {speech_status}")
     print(f"FFmpeg: {report.ffmpeg_version or 'not found'}")
     print(f"ffprobe: {'found' if report.ffprobe_found else 'not found'}")
     print(f"ASS captions: {'ready' if report.ass_filter and report.fontconfig else 'not ready'}")
@@ -92,7 +125,15 @@ def _doctor(config: AppConfig) -> int:
         print(f"Problem: {problem}")
     if not config.reddit.credentials_configured:
         print("Problem: set REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET for live ingestion.")
-    return 0 if report.ready_for_rendering and config.reddit.credentials_configured else 1
+    if not config.speech.configured:
+        print("Problem: set speech.voice to an Edge TTS voice name.")
+    return (
+        0
+        if report.ready_for_rendering
+        and config.reddit.credentials_configured
+        and config.speech.configured
+        else 1
+    )
 
 
 if __name__ == "__main__":

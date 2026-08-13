@@ -20,3 +20,16 @@ storage:
 media:
   ffmpeg_path: "ffmpeg"
   ffprobe_path: "ffprobe"
+
+speech:
+  # Run `uv run edge-tts --list-voices` to browse available voice names.
+  provider: "edge-tts"
+  voice: "en-US-EmmaMultilingualNeural"
+  rate: "+0%"
+  volume: "+0%"
+  pitch: "+0Hz"
+  segment_pause_ms: 350
+  connect_timeout_seconds: 10
+  receive_timeout_seconds: 60
+  pronunciations:
+    AITA: "am I the asshole"

@@ -446,8 +446,10 @@ Acceptance: fixture tests prove that a useful parent comment is included with it
 
 ### Phase 2 - script, TTS, and alignment
 
+Status: implemented with source-linked review artifacts, deterministic cleanup and sentence-boundary editing, an Edge TTS word-boundary adapter, MP3-to-PCM normalization, per-segment WAV caching, absolute word alignment, and an offline fake provider.
+
 - Implement text cleanup, source-linked script generation, speech adapter, per-segment caching, pauses, and timestamps.
-- Emit a human-readable script/source report before paid synthesis and support a fake offline speech provider in tests.
+- Emit a human-readable script/source report before network synthesis and support a fake offline speech provider in tests.
 
 Acceptance: no spoken segment lacks a source reference; concatenated word timings are monotonic and remain within audio duration.
 

@@ -11,7 +11,9 @@ uv sync --group dev
 cp config.example.yaml config.yaml
 ```
 
-Set `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, and `REDDIT_USER_AGENT` in the environment. The user agent should uniquely identify the application and operator as required by Reddit's API guidance. Do not commit credentials.
+Set `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, and `REDDIT_USER_AGENT` in the environment. The Reddit user agent should uniquely identify the application and operator. Do not commit credentials.
+
+Narration uses Edge TTS and does not require an API key. Choose a voice in `config.yaml`; available voice names can be listed with `uv run edge-tts --list-voices`.
 
 FFmpeg and ffprobe are system dependencies for later rendering phases. Check local readiness with:
 
@@ -31,9 +33,16 @@ The command prints a run ID. Score and select comment exchanges for that run:
 
 ```bash
 uv run redditsurfer select RUN_ID
+uv run redditsurfer script RUN_ID
 ```
 
-Artifacts are written to `runs/<run-id>/thread.json`, `selection.json`, and `manifest.json`. Real snapshots and generated artifacts are ignored by Git.
+Review `runs/<run-id>/script.txt` before starting network speech synthesis:
+
+```bash
+uv run redditsurfer narrate RUN_ID
+```
+
+Artifacts are written under `runs/<run-id>`, including `thread.json`, `selection.json`, `script.json`, `script.txt`, `speech.json`, and `speech/narration.wav`. Real snapshots and generated artifacts are ignored by Git. Narration is synthesized one segment at a time and cached, so unchanged completed segments are reused after a retry.
 
 ## Development
 

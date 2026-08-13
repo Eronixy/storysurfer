@@ -47,3 +47,19 @@ class SelectionError(RedditSurferError):
     """A thread cannot produce a usable editorial selection."""
 
     exit_code = 6
+
+
+class ScriptError(RedditSurferError):
+    """A source-linked narration script cannot be created or read."""
+
+    exit_code = 7
+
+
+class SpeechError(RedditSurferError):
+    """Speech synthesis or audio composition failed."""
+
+    exit_code = 8
+
+
+class AlignmentError(SpeechError):
+    """Speech timing data is absent, invalid, or incompatible with the audio."""
