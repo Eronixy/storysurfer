@@ -57,9 +57,7 @@ def test_edge_speech_modifiers_are_validated(tmp_path: Path) -> None:
 
 def test_invalid_fraction_is_rejected(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "selection:\n  comment_budget_fraction: 1.5\n", encoding="utf-8"
-    )
+    config_path.write_text("selection:\n  comment_budget_fraction: 1.5\n", encoding="utf-8")
 
     with pytest.raises(ConfigurationError, match="between 0 and 1"):
         load_config(config_path, environ={})
@@ -67,9 +65,22 @@ def test_invalid_fraction_is_rejected(tmp_path: Path) -> None:
 
 def test_caption_word_limits_must_be_ordered(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "captions:\n  min_words: 5\n  max_words: 2\n", encoding="utf-8"
-    )
+    config_path.write_text("captions:\n  min_words: 5\n  max_words: 2\n", encoding="utf-8")
 
     with pytest.raises(ConfigurationError, match="cannot exceed"):
         load_config(config_path, environ={})
+
+
+def test_selection_kind_counts_are_configurable(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "selection:\n  requested_op_exchanges: 4\n  requested_comments: 6\n",
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path, environ={})
+
+    assert config.selection.requested_op_exchanges == 4
+    assert config.selection.requested_comments == 6
+    assert config.public_dict()["selection"]["requested_op_exchanges"] == 4
+    assert config.public_dict()["selection"]["requested_comments"] == 6

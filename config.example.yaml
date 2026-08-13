@@ -12,7 +12,8 @@ selection:
   comment_budget_fraction: 0.25
   max_comment_depth: 8
   max_candidate_words: 220
-  max_selected_candidates: 5
+  requested_op_exchanges: 5
+  requested_comments: 5
 
 storage:
   runs_dir: "runs"

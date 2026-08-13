@@ -54,3 +54,11 @@ def test_cleanup_removes_orphaned_markdown_escapes_from_legacy_scripts() -> None
     cleaned = clean_for_speech(r"mas maganda si \\ toot\\ kaysa sayo")
 
     assert cleaned.text == "mas maganda si toot kaysa sayo"
+
+
+def test_cleanup_preserves_straight_curly_and_html_quotation_marks() -> None:
+    cleaned = clean_for_speech(
+        '&quot;Straight quote,&quot; she said. “Curly quote.” \'Single quote.\' 🤣 **bold**'
+    )
+
+    assert cleaned.text == '"Straight quote," she said. “Curly quote.” \'Single quote.\' bold'

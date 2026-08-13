@@ -68,19 +68,35 @@ def select_thread(snapshot: ThreadSnapshot, config: SelectionConfig) -> Selectio
     intro_budget = max(5, round(target_words * 0.08))
     post_budget = max(0, target_words - comment_budget - intro_budget)
     remaining = comment_budget
-    selected_count = 0
     selected_words = 0
+    selected_op_exchanges = 0
+    selected_comments = 0
     final_candidates: list[SelectionCandidate] = []
     for internal, candidate in scored:
-        can_select = (
-            not internal.duplicate
-            and selected_count < config.max_selected_candidates
-            and candidate.word_count <= remaining
+        linked_update = candidate.kind == "op_update" and any(
+            source_id.startswith("update-") for source_id in candidate.source_ids
         )
+        within_kind_quota = (
+            candidate.kind == "op_update"
+            or (
+                candidate.kind == "op_exchange"
+                and selected_op_exchanges < config.requested_op_exchanges
+            )
+            or (candidate.kind == "comment" and selected_comments < config.requested_comments)
+        )
+        if linked_update:
+            can_select = True
+        else:
+            can_select = (
+                not internal.duplicate and within_kind_quota and candidate.word_count <= remaining
+            )
         if can_select:
-            remaining -= candidate.word_count
+            remaining = max(0, remaining - candidate.word_count)
             selected_words += candidate.word_count
-            selected_count += 1
+            if candidate.kind == "op_exchange":
+                selected_op_exchanges += 1
+            elif candidate.kind == "comment":
+                selected_comments += 1
         final_candidates.append(
             SelectionCandidate(
                 id=candidate.id,
@@ -119,7 +135,11 @@ def select_thread(snapshot: ThreadSnapshot, config: SelectionConfig) -> Selectio
 
 
 def _build_candidates(snapshot: ThreadSnapshot, config: SelectionConfig) -> list[_Candidate]:
-    eligible = {comment.id: comment for comment in snapshot.comments if _eligible(comment, config)}
+    eligible = {
+        comment.id: comment
+        for comment in snapshot.comments
+        if comment.id.startswith("update-") or _eligible(comment, config)
+    }
     children: dict[str, list[Comment]] = {}
     for comment in eligible.values():
         children.setdefault(comment.parent_id, []).append(comment)
@@ -161,7 +181,7 @@ def _build_candidates(snapshot: ThreadSnapshot, config: SelectionConfig) -> list
             comment.is_op
             and comment.id not in used_op_replies
             and comment.parent_id == snapshot.submission.id
-            and _is_op_update(comment.body)
+            and (comment.id.startswith("update-") or _is_op_update(comment.body))
         ):
             candidates.append(
                 _Candidate(
@@ -196,6 +216,8 @@ def _is_op_update(body: str) -> bool:
 def _mark_duplicates(candidates: list[_Candidate]) -> None:
     prior_text: list[str] = []
     for candidate in sorted(candidates, key=lambda item: item.order):
+        if candidate.kind == "op_update" and candidate.comments[0].id.startswith("update-"):
+            continue
         initiating_text = candidate.comments[0].body
         candidate.duplicate = any(
             similarity(initiating_text, previous) >= 0.82 for previous in prior_text

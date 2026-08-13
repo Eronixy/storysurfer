@@ -129,6 +129,7 @@ class PipelineJobExecutor:
                 project.source_url,
                 config,
                 self.storage,
+                project.update_urls,
                 source_factory=self.source_factory,
             )
             progress("select", 55, "Ranking complete comment exchanges.")

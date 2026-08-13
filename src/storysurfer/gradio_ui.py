@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import secrets
 import tempfile
 import threading
@@ -55,6 +56,69 @@ html { overflow-y: scroll; scrollbar-gutter: stable; }
 .ss-tab-content > div { width: 100% !important; max-width: 100% !important; min-width: 0; }
 .ss-hero h1 { letter-spacing: -.04em; } .ss-hero p { color: #666; }
 .ss-video video { max-height: 68vh !important; object-fit: contain !important; }
+#delete-project-modal {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 10000 !important;
+  width: 100% !important;
+  max-width: none !important;
+  height: 100dvh !important;
+  min-height: 0 !important;
+  padding: 1rem !important;
+  margin: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: rgba(15, 23, 42, .72) !important;
+}
+#delete-project-dialog {
+  box-sizing: border-box !important;
+  width: min(32rem, calc(100vw - 2rem)) !important;
+  max-width: 32rem !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: calc(100dvh - 2rem) !important;
+  flex: 0 0 auto !important;
+  align-self: center !important;
+  overflow-y: auto !important;
+  gap: 1rem !important;
+  padding: 1.5rem !important;
+  border: 1px solid #dc2626 !important;
+  border-radius: 1rem !important;
+  background: var(--block-background-fill) !important;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, .35) !important;
+}
+#delete-project-dialog .ss-delete-copy,
+#delete-project-dialog .ss-delete-copy > div,
+#delete-project-dialog .ss-delete-copy .prose {
+  min-height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+#delete-project-actions {
+  gap: .75rem !important;
+  background: transparent !important;
+}
+#delete-project-trigger,
+#delete-project-trigger button,
+#confirm-delete-project,
+#confirm-delete-project button {
+  color: #fff !important;
+  border-color: #dc2626 !important;
+  background: #dc2626 !important;
+}
+#delete-project-trigger:hover,
+#delete-project-trigger button:hover,
+#confirm-delete-project:hover,
+#confirm-delete-project button:hover {
+  border-color: #b91c1c !important;
+  background: #b91c1c !important;
+}
 button:focus-visible, input:focus-visible, textarea:focus-visible {
   outline: 3px solid #2563eb !important; outline-offset: 2px !important;
 }
@@ -99,8 +163,6 @@ class GradioApplication:
                     str(Path("config.yaml").resolve()),
                     str(self.config.web.database_path.resolve()),
                 ],
-                theme=gr.themes.Base(primary_hue="blue", neutral_hue="stone"),
-                css=CSS,
             )
         finally:
             self.close()
@@ -222,6 +284,8 @@ def _build_ui(
         fill_width=True,
         analytics_enabled=False,
         delete_cache=(3600, 86400),
+        theme=gr.themes.Base(primary_hue="blue", neutral_hue="stone"),
+        css=CSS,
     ) as demo:
         csrf = gr.State("")
         gr.Markdown(
@@ -242,6 +306,11 @@ def _build_ui(
                     wrap=True,
                 )
                 url = gr.Textbox(label="Reddit post URL")
+                update_urls = gr.Textbox(
+                    label="Update post URLs (optional, one per line)",
+                    lines=3,
+                    info="Each update must be a public Reddit post by the original poster.",
+                )
                 upload = gr.File(
                     label="Gameplay video",
                     file_types=[".mp4", ".mov", ".mkv", ".webm"],
@@ -259,6 +328,21 @@ def _build_ui(
                         label="Target duration (seconds)",
                     )
                 with gr.Row():
+                    requested_op_exchanges = gr.Slider(
+                        0,
+                        50,
+                        config.selection.requested_op_exchanges,
+                        step=1,
+                        label="Requested OP exchanges",
+                    )
+                    requested_comments = gr.Slider(
+                        0,
+                        50,
+                        config.selection.requested_comments,
+                        step=1,
+                        label="Requested standalone comments",
+                    )
+                with gr.Row():
                     create_language = gr.Dropdown(
                         choices=[(configured_locale, configured_locale)],
                         value=configured_locale,
@@ -272,6 +356,30 @@ def _build_ui(
                     )
                 voice_status = gr.Markdown("Loading the Edge TTS voice catalog…")
                 create = gr.Button("Create and prepare", variant="primary")
+                delete_project = gr.Button(
+                    "Delete selected project",
+                    variant="stop",
+                    elem_id="delete-project-trigger",
+                )
+                with (
+                    gr.Column(visible=False, elem_id="delete-project-modal") as delete_modal,
+                    gr.Column(variant="compact", elem_id="delete-project-dialog"),
+                ):
+                    gr.Markdown(
+                        "## Permanently delete project?", elem_classes="ss-delete-copy"
+                    )
+                    delete_prompt = gr.Markdown(elem_classes="ss-delete-copy")
+                    gr.Markdown(
+                        "This removes all generated files and cannot be undone.",
+                        elem_classes="ss-delete-copy",
+                    )
+                    with gr.Row(elem_id="delete-project-actions"):
+                        cancel_delete = gr.Button("Cancel", elem_id="cancel-delete-project")
+                        confirm_delete = gr.Button(
+                            "Permanently delete project",
+                            variant="stop",
+                            elem_id="confirm-delete-project",
+                        )
             with gr.Tab("Review", elem_classes="ss-tab-content"):
                 load_review = gr.Button("Load selected project for review")
                 source = gr.Textbox(label="Original post", lines=12, interactive=False)
@@ -279,13 +387,14 @@ def _build_ui(
                     headers=["ID", "Included", "Kind", "Score", "Context", "Reasons"],
                     datatype=["str", "bool", "str", "number", "str", "str"],
                     type="array",
-                    interactive=False,
+                    interactive=True,
+                    static_columns=[0, 2, 3, 4, 5],
                     wrap=True,
-                    label="Relevant comment candidates",
+                    label="Relevant comment candidates — edit Included only",
                 )
-                included = gr.CheckboxGroup(
-                    label="Include complete exchanges",
-                    info="A commenter message and OP's direct reply are one atomic choice.",
+                gr.Markdown(
+                    "Check **Included** to narrate a candidate. A commenter message and "
+                    "OP's direct reply remain one atomic exchange."
                 )
                 save_selection = gr.Button("Save selection and rebuild script")
                 script = gr.Dataframe(
@@ -296,7 +405,15 @@ def _build_ui(
                     wrap=True,
                     label="Narration script — edit only Spoken text",
                 )
-                save_script = gr.Button("Save script revision")
+                save_script = gr.Button("Save table script revision")
+                centralized_script = gr.Textbox(
+                    label="Centralized narration script",
+                    lines=20,
+                    info=(
+                        "Edit narration in one place. Keep each [[segment-id]] marker unchanged."
+                    ),
+                )
+                save_centralized_script = gr.Button("Save centralized script revision")
             with gr.Tab("Style & render", elem_classes="ss-tab-content"):
                 with gr.Row():
                     style_language = gr.Dropdown(
@@ -379,20 +496,71 @@ def _build_ui(
         def refresh_runs() -> tuple[Any, list[list[str | int]]]:
             return gr.Dropdown(choices=run_choices()), dashboard_rows()
 
+        def open_delete_modal(run_id: str | None) -> tuple[Any, str, str]:
+            try:
+                chosen = _run_id(run_id)
+                storage.require_run(chosen)
+                return (
+                    gr.Column(visible=True),
+                    f"Selected project: `{chosen}`",
+                    _ok("Confirm deletion in the dialog."),
+                )
+            except (StorySurferError, ValueError) as exc:
+                return gr.Column(visible=False), "", _error(exc)
+
+        def close_delete_modal() -> Any:
+            return gr.Column(visible=False)
+
+        def delete_selected_project(
+            token: str,
+            run_id: str | None,
+            request: gr.Request,
+        ) -> tuple[str, Any, Any, Any]:
+            try:
+                verify(token, request)
+                chosen = _run_id(run_id)
+                storage.require_run(chosen)
+                jobs.request_cancel(chosen)
+                jobs.delete_for_run(chosen)
+                storage.delete_run(chosen)
+                return (
+                    _ok(f"Permanently deleted project {chosen}."),
+                    gr.Dropdown(choices=run_choices(), value=None),
+                    dashboard_rows(),
+                    gr.Column(visible=False),
+                )
+            except (StorySurferError, ValueError) as exc:
+                return _error(exc), gr.skip(), gr.skip(), gr.Column(visible=False)
+
         def create_project(
             token: str,
             source_url: str,
+            update_post_urls: str,
             uploaded: str | None,
             selected_preset: str,
             seconds: float,
             selected_voice: str,
+            op_exchange_count: float,
+            comment_count: float,
             request: gr.Request,
         ) -> tuple[str, Any, list[list[str | int]]]:
             try:
                 verify(token, request)
                 if uploaded is None:
                     raise WebError("Choose a gameplay video.")
-                parse_reddit_reference(source_url)
+                main_reference = parse_reddit_reference(source_url)
+                update_references = tuple(
+                    parse_reddit_reference(line.strip())
+                    for line in update_post_urls.splitlines()
+                    if line.strip()
+                )
+                update_ids = [item.submission_id for item in update_references]
+                if main_reference.submission_id in update_ids or len(update_ids) != len(
+                    set(update_ids)
+                ):
+                    raise WebError(
+                        "Update post URLs must be unique and different from the main post."
+                    )
                 source_path = _validate_upload(
                     Path(uploaded), upload_root, config.web.upload_limit_bytes
                 )
@@ -402,12 +570,15 @@ def _build_ui(
                 project = ProjectSettings.from_dict(
                     {
                         "schema_version": 1,
-                        "source_url": source_url,
+                        "source_url": main_reference.canonical_url,
+                        "update_urls": [item.canonical_url for item in update_references],
                         "staging_path": f"staging/gameplay{suffix}",
                         "background_path": f"assets/gameplay{suffix}",
                         "preset": selected_preset,
                         "target_duration_seconds": int(seconds),
                         "voice": selected_voice,
+                        "requested_op_exchanges": int(op_exchange_count),
+                        "requested_comments": int(comment_count),
                     }
                 )
                 run_id = storage.create_run(project.apply(config).public_dict())
@@ -448,9 +619,8 @@ def _build_ui(
                 chosen = _run_id(run_id)
                 thread, selection = storage.read_thread(chosen), storage.read_selection(chosen)
                 comments = {item.id: item for item in thread.comments}
-                rows, choices, selected = [], [], []
+                rows = []
                 for item in selection.candidates:
-                    choices.append((item.kind.replace("_", " "), item.id))
                     context = "\n".join(
                         f"{'OP' if comments[key].is_op else 'Commenter'}: {comments[key].body}"
                         for key in item.source_ids
@@ -466,15 +636,14 @@ def _build_ui(
                             ", ".join(item.reason_codes),
                         ]
                     )
-                    if item.selected:
-                        selected.append(item.id)
                 project = projects.read(chosen)
+                review_script = storage.read_script(chosen)
                 language_control, voice_control = voice_controls(project.voice)
                 return (
                     f"TITLE\n{thread.submission.title}\n\nPOST\n{thread.submission.body}",
                     rows,
-                    gr.CheckboxGroup(choices=choices, value=selected),
-                    _script_rows(storage.read_script(chosen)),
+                    _script_rows(review_script),
+                    _centralized_script_text(review_script),
                     language_control,
                     voice_control,
                     project.highlight_color,
@@ -486,8 +655,8 @@ def _build_ui(
                 return (
                     "",
                     [],
-                    gr.CheckboxGroup(),
                     [],
+                    "",
                     language_control,
                     voice_control,
                     "#FFD54F",
@@ -496,20 +665,28 @@ def _build_ui(
                 )
 
         def select_sources(
-            token: str, run_id: str | None, ids: list[str], request: gr.Request
-        ) -> tuple[list[list[str]], str]:
+            token: str, run_id: str | None, rows: list[list[Any]], request: gr.Request
+        ) -> tuple[list[list[str]], str, str]:
             try:
                 verify(token, request)
                 chosen = _run_id(run_id)
-                revise_selection(chosen, set(ids or []), storage)
+                revise_selection(chosen, _selected_candidate_ids(rows), storage)
                 result = script_run(chosen, projects.read(chosen).apply(config), storage)
-                return _script_rows(result), _ok("Selection and script saved.")
+                return (
+                    _script_rows(result),
+                    _centralized_script_text(result),
+                    _ok("Selection and script saved."),
+                )
             except (StorySurferError, ValueError) as exc:
-                return [], _error(exc)
+                return [], "", _error(exc)
 
         def edit_script(
-            token: str, run_id: str | None, rows: list[list[Any]], request: gr.Request
-        ) -> tuple[list[list[str]], str]:
+            token: str,
+            run_id: str | None,
+            rows: list[list[Any]],
+            centralized_value: str,
+            request: gr.Request,
+        ) -> tuple[list[list[str]], str, str]:
             try:
                 verify(token, request)
                 chosen = _run_id(run_id)
@@ -519,9 +696,38 @@ def _build_ui(
                 result = revise_script(
                     chosen, texts, groups, projects.read(chosen).apply(config), storage
                 )
-                return _script_rows(result), _ok("Script revision saved.")
+                return (
+                    _script_rows(result),
+                    _centralized_script_text(result),
+                    _ok("Table script revision saved."),
+                )
             except (StorySurferError, ValueError) as exc:
-                return rows or [], _error(exc)
+                return rows or [], centralized_value, _error(exc)
+
+        def edit_centralized_script(
+            token: str,
+            run_id: str | None,
+            value: str,
+            request: gr.Request,
+        ) -> tuple[list[list[str]], str, str]:
+            current_rows: list[list[str]] = []
+            try:
+                verify(token, request)
+                chosen = _run_id(run_id)
+                current = storage.read_script(chosen)
+                current_rows = _script_rows(current)
+                texts = _parse_centralized_script(value, current)
+                groups = tuple(group[0].id for group in narration_groups(current))
+                result = revise_script(
+                    chosen, texts, groups, projects.read(chosen).apply(config), storage
+                )
+                return (
+                    _script_rows(result),
+                    _centralized_script_text(result),
+                    _ok("Centralized script revision saved."),
+                )
+            except (StorySurferError, ValueError) as exc:
+                return current_rows, value, _error(exc)
 
         def style(
             token: str,
@@ -680,8 +886,37 @@ def _build_ui(
         )
         create.click(
             create_project,
-            [csrf, url, upload, preset, duration, voice],
+            [
+                csrf,
+                url,
+                update_urls,
+                upload,
+                preset,
+                duration,
+                voice,
+                requested_op_exchanges,
+                requested_comments,
+            ],
             [status, run, dashboard],
+            api_visibility="private",
+        )
+        delete_project.click(
+            open_delete_modal,
+            run,
+            [delete_modal, delete_prompt, status],
+            queue=False,
+            api_visibility="private",
+        )
+        cancel_delete.click(
+            close_delete_modal,
+            outputs=delete_modal,
+            queue=False,
+            api_visibility="private",
+        )
+        confirm_delete.click(
+            delete_selected_project,
+            [csrf, run],
+            [status, run, dashboard, delete_modal],
             api_visibility="private",
         )
         load_review.click(
@@ -690,8 +925,8 @@ def _build_ui(
             [
                 source,
                 candidates,
-                included,
                 script,
+                centralized_script,
                 style_language,
                 style_voice,
                 color,
@@ -702,14 +937,26 @@ def _build_ui(
         )
         save_selection.click(
             select_sources,
-            [csrf, run, included],
-            [script, status],
+            [csrf, run, candidates],
+            [script, centralized_script, status],
+            api_visibility="private",
+        )
+        candidates.input(
+            select_sources,
+            [csrf, run, candidates],
+            [script, centralized_script, status],
             api_visibility="private",
         )
         save_script.click(
             edit_script,
-            [csrf, run, script],
-            [script, status],
+            [csrf, run, script, centralized_script],
+            [script, centralized_script, status],
+            api_visibility="private",
+        )
+        save_centralized_script.click(
+            edit_centralized_script,
+            [csrf, run, centralized_script],
+            [script, centralized_script, status],
             api_visibility="private",
         )
         save_style.click(
@@ -778,6 +1025,39 @@ def _script_rows(script: Any) -> list[list[str]]:
         [groups[item.id], item.id, item.speaker_label, item.spoken_text, item.original_excerpt]
         for item in script.segments
     ]
+
+
+def _selected_candidate_ids(rows: list[list[Any]] | None) -> set[str]:
+    return {
+        str(row[0])
+        for row in rows or []
+        if len(row) >= 2 and isinstance(row[0], str) and row[1] is True
+    }
+
+
+def _centralized_script_text(script: Any) -> str:
+    return "\n\n".join(f"[[{segment.id}]]\n{segment.spoken_text}" for segment in script.segments)
+
+
+def _parse_centralized_script(value: str, script: Any) -> dict[str, str]:
+    marker = re.compile(r"(?m)^\[\[([^\]\r\n]+)\]\]\s*$")
+    matches = list(marker.finditer(value))
+    expected = [segment.id for segment in script.segments]
+    found = [match.group(1) for match in matches]
+    if found != expected:
+        raise WebError(
+            "Centralized script markers are missing, reordered, or changed. "
+            "Reload the project and keep every [[segment-id]] marker unchanged."
+        )
+    result: dict[str, str] = {}
+    for index, match in enumerate(matches):
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(value)
+        text = value[start:end].strip()
+        if not text:
+            raise WebError(f"Centralized script segment is empty: {match.group(1)}")
+        result[match.group(1)] = text
+    return result
 
 
 def _ok(message: str) -> str:

@@ -2,13 +2,18 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from storysurfer.config import AppConfig, StorageConfig, WebConfig
 from storysurfer.errors import WebError
 from storysurfer.gradio_ui import (
+    CSS,
+    _centralized_script_text,
     _copy_upload,
+    _parse_centralized_script,
+    _selected_candidate_ids,
     _SessionTokens,
     _validate_upload,
     create_gradio_app,
@@ -30,7 +35,30 @@ def test_gradio_ui_exposes_private_complete_workflow(app_config: AppConfig, tmp_
     assert "Reddit post URL" in labels
     assert "Narration language / locale" in labels
     assert "Edge TTS voice" in labels
-    assert "Include complete exchanges" in labels
+    assert "Update post URLs (optional, one per line)" in labels
+    assert "Requested OP exchanges" in labels
+    assert "Requested standalone comments" in labels
+    assert "Centralized narration script" in labels
+    assert "Relevant comment candidates — edit Included only" in labels
+    button_values = {
+        item["props"].get("value")
+        for item in browser["components"]
+        if item["type"] == "button"
+    }
+    assert "Delete selected project" in button_values
+    assert "Permanently delete project" in button_values
+    delete_modals = [
+        item
+        for item in browser["components"]
+        if item["props"].get("elem_id") == "delete-project-modal"
+    ]
+    assert len(delete_modals) == 1
+    assert not delete_modals[0]["props"]["visible"]
+    assert browser["css"] == CSS
+    assert "#delete-project-dialog" in CSS
+    assert "#confirm-delete-project" in CSS
+    assert "height: auto !important" in CSS
+    assert "flex: 0 0 auto !important" in CSS
     assert "I confirm I have rights to use the source content and assets" in labels
     assert {item["api_visibility"] for item in browser["dependencies"]} == {"private"}
     tabs = [item for item in browser["components"] if item["type"] == "tabs"]
@@ -44,6 +72,18 @@ def test_gradio_ui_exposes_private_complete_workflow(app_config: AppConfig, tmp_
     assert len(voice_controls) == 2
     assert {item["type"] for item in voice_controls} == {"dropdown"}
     components = {item["id"]: item for item in browser["components"]}
+    candidate_table = next(
+        item
+        for item in browser["components"]
+        if item["props"].get("label") == "Relevant comment candidates — edit Included only"
+    )
+    assert candidate_table["props"]["interactive"]
+    assert candidate_table["props"]["static_columns"] == [0, 2, 3, 4, 5]
+    assert any(
+        dependency["targets"][0][1] == "input"
+        and candidate_table["id"] in dependency["inputs"]
+        for dependency in browser["dependencies"]
+    )
     locale_filter_events = [
         dependency["targets"][0][1]
         for dependency in browser["dependencies"]
@@ -83,3 +123,30 @@ def test_state_changing_action_token_is_bound_to_session() -> None:
     sessions.verify(token, "browser-one")
     with pytest.raises(WebError, match="CSRF"):
         sessions.verify(token, "browser-two")
+
+
+def test_centralized_script_round_trips_segment_text_and_protects_markers() -> None:
+    script = SimpleNamespace(
+        segments=(
+            SimpleNamespace(id="title-one", spoken_text="First title"),
+            SimpleNamespace(id="post-one", spoken_text="Full post text"),
+        )
+    )
+    value = _centralized_script_text(script)
+
+    assert _parse_centralized_script(value, script) == {
+        "title-one": "First title",
+        "post-one": "Full post text",
+    }
+    with pytest.raises(WebError, match="markers"):
+        _parse_centralized_script(value.replace("[[post-one]]", "[[changed]]"), script)
+
+
+def test_selected_candidate_ids_uses_checked_table_rows() -> None:
+    rows = [
+        ["candidate-1", True, "comment"],
+        ["candidate-2", False, "comment"],
+        ["candidate-3", True, "op_exchange"],
+    ]
+
+    assert _selected_candidate_ids(rows) == {"candidate-1", "candidate-3"}

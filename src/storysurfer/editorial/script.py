@@ -237,9 +237,10 @@ def _post_ref(snapshot: ThreadSnapshot, original: str) -> SourceRef:
 
 def _comment_ref(comment: Comment) -> SourceRef:
     role: Literal["op", "commenter"] = "op" if comment.is_op else "commenter"
+    linked_update = comment.id.startswith("update-")
     return SourceRef(
-        source_type="comment",
-        source_id=comment.id,
+        source_type="post" if linked_update else "comment",
+        source_id=comment.id.removeprefix("update-") if linked_update else comment.id,
         permalink=comment.permalink,
         author_role=role,
         original_text_hash=_text_hash(comment.body),

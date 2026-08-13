@@ -102,7 +102,8 @@ class SelectionConfig:
     comment_budget_fraction: float = 0.25
     max_comment_depth: int = 8
     max_candidate_words: int = 220
-    max_selected_candidates: int = 5
+    requested_op_exchanges: int = 5
+    requested_comments: int = 5
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,8 +202,9 @@ class AppConfig:
                 "words_per_minute": self.selection.words_per_minute,
                 "comment_budget_fraction": self.selection.comment_budget_fraction,
                 "max_comment_depth": self.selection.max_comment_depth,
+                "requested_op_exchanges": self.selection.requested_op_exchanges,
+                "requested_comments": self.selection.requested_comments,
                 "max_candidate_words": self.selection.max_candidate_words,
-                "max_selected_candidates": self.selection.max_selected_candidates,
             },
             "storage": {"runs_dir": str(self.storage.runs_dir)},
             "media": {
@@ -335,8 +337,11 @@ def load_config(
         max_candidate_words=_integer(
             selection_data, "max_candidate_words", 220, minimum=10, maximum=2_000
         ),
-        max_selected_candidates=_integer(
-            selection_data, "max_selected_candidates", 5, minimum=0, maximum=50
+        requested_op_exchanges=_integer(
+            selection_data, "requested_op_exchanges", 5, minimum=0, maximum=50
+        ),
+        requested_comments=_integer(
+            selection_data, "requested_comments", 5, minimum=0, maximum=50
         ),
     )
 

@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import tempfile
 import uuid
 from collections.abc import Callable, Mapping
@@ -92,6 +93,14 @@ class RunStorage:
             and (path / "manifest.json").is_file()
         ]
         return tuple(sorted(run_ids, reverse=True))
+
+    def delete_run(self, run_id: str) -> None:
+        """Permanently remove one containment-checked run directory."""
+        path = self.require_run(run_id)
+        try:
+            shutil.rmtree(path)
+        except OSError as exc:
+            raise StorageError(f"Could not delete run directory: {run_id}") from exc
 
     def write_thread(self, run_id: str, snapshot: ThreadSnapshot) -> Path:
         path = self.write_json(run_id, "thread.json", snapshot.to_dict())

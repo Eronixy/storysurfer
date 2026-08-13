@@ -140,6 +140,24 @@ class JobStore:
             )
             return cursor.rowcount
 
+    def delete_for_run(self, run_id: str) -> int:
+        """Delete inactive job history for a run while atomically rejecting active work."""
+        with self._connect() as database:
+            database.execute("BEGIN IMMEDIATE")
+            active = database.execute(
+                "SELECT 1 FROM jobs WHERE run_id = ? AND state = 'running' LIMIT 1",
+                (run_id,),
+            ).fetchone()
+            if active is not None:
+                database.rollback()
+                raise JobCancelled(
+                    "The project still has a running job. Cancellation was requested; "
+                    "wait for it to stop, then delete again."
+                )
+            cursor = database.execute("DELETE FROM jobs WHERE run_id = ?", (run_id,))
+            database.commit()
+            return cursor.rowcount
+
     def cancellation_requested(self, job_id: str) -> bool:
         return self.get(job_id).cancel_requested
 

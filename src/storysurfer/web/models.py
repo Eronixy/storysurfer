@@ -18,6 +18,9 @@ class ProjectSettings:
     preset: Literal["subway", "minecraft"]
     target_duration_seconds: int
     voice: str
+    update_urls: tuple[str, ...] = ()
+    requested_op_exchanges: int = 5
+    requested_comments: int = 5
     crop_offset: float = 0.0
     retain_background_audio: bool = False
     primary_color: str = "#FFFFFF"
@@ -34,6 +37,9 @@ class ProjectSettings:
             "preset": self.preset,
             "target_duration_seconds": self.target_duration_seconds,
             "voice": self.voice,
+            "update_urls": list(self.update_urls),
+            "requested_op_exchanges": self.requested_op_exchanges,
+            "requested_comments": self.requested_comments,
             "crop_offset": self.crop_offset,
             "retain_background_audio": self.retain_background_audio,
             "primary_color": self.primary_color,
@@ -53,6 +59,9 @@ class ProjectSettings:
         preset = data.get("preset")
         duration = data.get("target_duration_seconds")
         voice = data.get("voice")
+        update_urls = data.get("update_urls", [])
+        requested_op_exchanges = data.get("requested_op_exchanges", 5)
+        requested_comments = data.get("requested_comments", 5)
         crop_offset = data.get("crop_offset", 0.0)
         retain_audio = data.get("retain_background_audio", False)
         primary = data.get("primary_color", "#FFFFFF")
@@ -74,6 +83,22 @@ class ProjectSettings:
             or not 15 <= duration <= 3600
         ):
             raise ConfigurationError("Project duration must be from 15 to 3600 seconds.")
+        if not isinstance(update_urls, list) or not all(
+            isinstance(item, str) and item.strip() for item in update_urls
+        ):
+            raise ConfigurationError("Project update post URLs are invalid.")
+        if (
+            not isinstance(requested_op_exchanges, int)
+            or isinstance(requested_op_exchanges, bool)
+            or not 0 <= requested_op_exchanges <= 50
+        ):
+            raise ConfigurationError("Project OP exchange count must be from 0 to 50.")
+        if (
+            not isinstance(requested_comments, int)
+            or isinstance(requested_comments, bool)
+            or not 0 <= requested_comments <= 50
+        ):
+            raise ConfigurationError("Project comment count must be from 0 to 50.")
         if not isinstance(voice, str) or not voice.strip():
             raise ConfigurationError("Project voice is invalid.")
         if (
@@ -100,6 +125,9 @@ class ProjectSettings:
             preset=cast(Literal["subway", "minecraft"], preset),
             target_duration_seconds=duration,
             voice=voice.strip(),
+            update_urls=tuple(dict.fromkeys(item.strip() for item in update_urls)),
+            requested_op_exchanges=requested_op_exchanges,
+            requested_comments=requested_comments,
             crop_offset=float(crop_offset),
             retain_background_audio=retain_audio,
             primary_color=primary,
@@ -113,6 +141,8 @@ class ProjectSettings:
             selection=replace(
                 base.selection,
                 target_duration_seconds=self.target_duration_seconds,
+                requested_op_exchanges=self.requested_op_exchanges,
+                requested_comments=self.requested_comments,
             ),
             speech=replace(base.speech, voice=self.voice),
             media=replace(

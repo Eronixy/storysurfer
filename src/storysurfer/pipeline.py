@@ -11,6 +11,7 @@ from storysurfer.captions import build_caption_artifact, render_ass, render_srt
 from storysurfer.config import AppConfig, MediaConfig
 from storysurfer.domain import (
     CaptionArtifact,
+    Comment,
     JsonValue,
     NarrationScript,
     NarrationSegment,
@@ -29,6 +30,7 @@ from storysurfer.errors import (
     RightsError,
     ScriptError,
     SelectionError,
+    SourceError,
     StorageError,
     StorySurferError,
     VerificationError,
@@ -141,15 +143,21 @@ def ingest_existing(
     source_value: str,
     config: AppConfig,
     storage: RunStorage,
+    update_source_values: tuple[str, ...] = (),
     *,
     source_factory: SourceFactory | None = None,
 ) -> ThreadSnapshot:
-    """Fetch and persist a Reddit snapshot into a server-created empty web run."""
+    """Fetch a main Reddit post plus verified OP-authored update posts."""
     storage.require_run(run_id)
     reference = parse_reddit_reference(source_value)
+    update_references = tuple(parse_reddit_reference(value) for value in update_source_values)
+    update_ids = [item.submission_id for item in update_references]
+    if reference.submission_id in update_ids or len(update_ids) != len(set(update_ids)):
+        raise SourceError("Update post URLs must be unique and different from the main post.")
     input_hash = json_hash(
         {
             "source_url": reference.canonical_url,
+            "update_urls": [item.canonical_url for item in update_references],
             "comment_sort": config.reddit.comment_sort,
             "max_comments": config.reddit.max_comments,
             "replace_more_limit": config.reddit.replace_more_limit,
@@ -162,12 +170,19 @@ def ingest_existing(
         raise StorageError("A completed web run cannot be repointed to a different Reddit source.")
     storage.set_stage(run_id, "ingest", "running", input_hash=input_hash)
     try:
-        factory = source_factory or _praw_source
-        raw = factory(config).fetch(reference)
+        source = (source_factory or _praw_source)(config)
         snapshot = normalize_thread(
-            raw,
+            source.fetch(reference),
             author_hash_salt=config.reddit.author_hash_salt,
         )
+        update_snapshots = tuple(
+            normalize_thread(
+                source.fetch(update_reference),
+                author_hash_salt=config.reddit.author_hash_salt,
+            )
+            for update_reference in update_references
+        )
+        snapshot = _with_update_posts(snapshot, update_snapshots)
         storage.write_thread(run_id, snapshot)
         storage.set_stage(run_id, "ingest", "completed", input_hash=input_hash)
         return snapshot
@@ -180,6 +195,46 @@ def ingest_existing(
             input_hash=input_hash,
         )
         raise
+
+
+def _with_update_posts(
+    snapshot: ThreadSnapshot, updates: tuple[ThreadSnapshot, ...]
+) -> ThreadSnapshot:
+    if not updates:
+        return snapshot
+    op_author = snapshot.submission.author_id
+    if op_author is None:
+        raise SourceError("The main post author is unavailable; update authors cannot be verified.")
+    comments = list(snapshot.comments)
+    known_post_ids = {snapshot.submission.id}
+    known_comment_ids = {comment.id for comment in comments}
+    for update in updates:
+        post = update.submission
+        if post.author_id != op_author:
+            raise SourceError("An update post was not written by the main post author.")
+        update_id = f"update-{post.id}"
+        if post.id in known_post_ids or update_id in known_comment_ids:
+            raise SourceError("An update post duplicates an existing Reddit source.")
+        body = f"{post.title}. {post.body}".strip()
+        comments.append(
+            Comment(
+                id=update_id,
+                parent_id=snapshot.submission.id,
+                author_id=op_author,
+                body=body,
+                score=post.score,
+                depth=0,
+                order=len(comments),
+                permalink=post.permalink,
+                created_utc=None,
+                is_op=True,
+                is_bot=False,
+                removed=False,
+            )
+        )
+        known_post_ids.add(post.id)
+        known_comment_ids.add(update_id)
+    return replace(snapshot, comments=tuple(comments))
 
 
 ingest_into_run = ingest_existing

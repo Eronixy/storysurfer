@@ -44,3 +44,15 @@ def test_run_id_cannot_escape_storage(tmp_path: Path) -> None:
 
     with pytest.raises(StorageError):
         storage.run_dir("../outside")
+
+
+def test_delete_run_removes_only_the_selected_run(tmp_path: Path) -> None:
+    storage = RunStorage(tmp_path / "runs")
+    deleted = storage.create_run({}, run_id="delete-me")
+    retained = storage.create_run({}, run_id="keep-me")
+
+    storage.delete_run(deleted)
+
+    assert not storage.run_dir(deleted).exists()
+    assert storage.require_run(retained).is_dir()
+    assert storage.list_run_ids() == (retained,)

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from pytest import MonkeyPatch
 
 from storysurfer.config import AppConfig, StorageConfig, WebConfig
+from storysurfer.errors import JobCancelled
 from storysurfer.media.probe import MediaInfo
 from storysurfer.storage import RunStorage
 from storysurfer.web.jobs import JobStore, JobWorker
@@ -59,6 +61,20 @@ def test_queued_job_can_be_cancelled_without_running(tmp_path: Path) -> None:
     assert cancelled.cancel_requested
 
 
+def test_job_history_deletion_rejects_running_work(tmp_path: Path) -> None:
+    store = JobStore(tmp_path / "jobs.sqlite3")
+    queued = store.enqueue("active-run", "preview", "input-hash")
+    assert store.claim_next() is not None
+    store.request_cancel("active-run")
+
+    with pytest.raises(JobCancelled, match="still has a running job"):
+        store.delete_for_run("active-run")
+
+    store.update(queued.id, state="cancelled", stage="cancelled")
+    assert store.delete_for_run("active-run") == 1
+    assert store.list_for_run("active-run") == ()
+
+
 def test_prepare_promotes_staged_upload_before_slow_pipeline_work(
     app_config: AppConfig, tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -80,6 +96,7 @@ def test_prepare_promotes_staged_upload_before_slow_pipeline_work(
         preset="minecraft",
         target_duration_seconds=60,
         voice=config.speech.voice,
+        update_urls=("https://www.reddit.com/comments/update1/",),
     )
     projects = ProjectRepository(storage)
     projects.write(run_id, project)
@@ -89,7 +106,11 @@ def test_prepare_promotes_staged_upload_before_slow_pipeline_work(
         "storysurfer.web.service.probe_media",
         lambda path, ffprobe: MediaInfo(path, 10_000, 1280, 720, False),
     )
-    monkeypatch.setattr("storysurfer.web.service.ingest_into_run", lambda *a, **k: None)
+    ingest_calls: list[tuple[object, ...]] = []
+    monkeypatch.setattr(
+        "storysurfer.web.service.ingest_into_run",
+        lambda *args, **kwargs: ingest_calls.append((*args, kwargs)),
+    )
     monkeypatch.setattr("storysurfer.web.service.select", lambda *a, **k: None)
     monkeypatch.setattr("storysurfer.web.service.script_run", lambda *a, **k: None)
 
@@ -99,6 +120,7 @@ def test_prepare_promotes_staged_upload_before_slow_pipeline_work(
 
     assert projects.background(run_id, project).read_bytes() == b"synthetic gameplay"
     assert not staged.exists()
+    assert ingest_calls[0][4] == project.update_urls
 
 
 def test_failed_job_can_retry_same_inputs_without_creating_a_duplicate(
@@ -121,3 +143,37 @@ def test_failed_job_can_retry_same_inputs_without_creating_a_duplicate(
     assert retried.error is None
     assert not retried.cancel_requested
     assert len(store.list_for_run("retry-run")) == 1
+
+
+def test_project_settings_preserve_updates_and_candidate_counts(
+    app_config: AppConfig,
+) -> None:
+    legacy = ProjectSettings.from_dict(
+        {
+            "schema_version": 1,
+            "source_url": "https://www.reddit.com/comments/main/",
+            "staging_path": "staging/gameplay.mp4",
+            "background_path": "assets/gameplay.mp4",
+            "preset": "minecraft",
+            "target_duration_seconds": 75,
+            "voice": "fil-PH-AngeloNeural",
+        }
+    )
+    updated = ProjectSettings.from_dict(
+        {
+            **legacy.to_dict(),
+            "update_urls": ["https://www.reddit.com/comments/update/"],
+            "requested_op_exchanges": 4,
+            "requested_comments": 6,
+        }
+    )
+
+    assert legacy.update_urls == ()
+    assert legacy.requested_op_exchanges == 5
+    assert legacy.requested_comments == 5
+    assert updated.update_urls == ("https://www.reddit.com/comments/update/",)
+    assert updated.requested_op_exchanges == 4
+    assert updated.requested_comments == 6
+    applied = updated.apply(app_config)
+    assert applied.selection.requested_op_exchanges == 4
+    assert applied.selection.requested_comments == 6

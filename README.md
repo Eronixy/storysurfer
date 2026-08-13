@@ -42,13 +42,14 @@ uv run storysurfer web
 
 In the browser:
 
-1. Enter a Reddit post URL and upload licensed gameplay.
-2. Review the complete post, relevant comments, and OP reply exchanges.
+1. Enter a Reddit post URL, optional OP-authored update URLs, OP-exchange/comment limits, and upload licensed gameplay.
+2. Review the complete post, relevant comments, and OP reply exchanges; revise narration in the table or centralized textarea.
 3. Choose an Edge TTS voice and caption style.
 4. Build and review a preview.
 5. Confirm asset rights and render the final video.
 
 If an existing run contains an old excerpt, click **Save selection and rebuild script** before rebuilding its preview.
+Projects can be permanently removed from the Projects tab through its confirmation dialog.
 
 ## CLI
 
