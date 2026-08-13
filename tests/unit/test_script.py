@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from redditsurfer.config import SelectionConfig, SpeechConfig
-from redditsurfer.domain import NarrationScript, ThreadSnapshot
-from redditsurfer.editorial.script import build_narration_script, render_script_report
-from redditsurfer.editorial.select import select_thread
+from storysurfer.config import SelectionConfig, SpeechConfig
+from storysurfer.domain import NarrationScript, ThreadSnapshot
+from storysurfer.editorial.script import build_narration_script, render_script_report
+from storysurfer.editorial.select import select_thread
 
 
 def test_script_is_source_linked_and_preserves_op_exchange_order(
@@ -22,9 +22,7 @@ def test_script_is_source_linked_and_preserves_op_exchange_order(
     assert script.created_at == "2026-01-02T00:00:00+00:00"
     assert all(segment.source_refs for segment in script.segments)
     assert all(
-        source.original_text_hash
-        for segment in script.segments
-        for source in segment.source_refs
+        source.original_text_hash for segment in script.segments for source in segment.source_refs
     )
     commenter_index = next(
         index for index, segment in enumerate(script.segments) if segment.id == "comment-c1"
@@ -55,3 +53,23 @@ def test_script_report_compares_original_and_spoken_text(
     assert "Spoken:" in report
     assert "Source: https://www.reddit.com/" in report
     assert "OP replied." in report
+
+
+def test_post_body_is_not_shortened_to_fit_duration_budget(
+    thread_snapshot: ThreadSnapshot,
+) -> None:
+    selection_config = SelectionConfig(target_duration_seconds=15)
+    selection = select_thread(thread_snapshot, selection_config)
+
+    script = build_narration_script(
+        thread_snapshot,
+        selection,
+        selection_config,
+        SpeechConfig(),
+    )
+
+    post = next(segment for segment in script.segments if segment.kind == "post")
+    assert post.spoken_text.endswith(thread_snapshot.submission.body)
+    assert post.original_excerpt == thread_snapshot.submission.body
+    assert not post.shortened
+    assert any("complete post exceeds" in warning for warning in script.warnings)

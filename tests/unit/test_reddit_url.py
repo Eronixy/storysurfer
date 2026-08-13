@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from redditsurfer.errors import SourceError
-from redditsurfer.reddit.url import parse_reddit_reference
+from storysurfer.errors import SourceError
+from storysurfer.reddit.url import parse_reddit_reference
 
 
 @pytest.mark.parametrize(

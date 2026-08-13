@@ -17,6 +17,10 @@ config.yml
 # Runtime and generated media
 runs/
 uploads/
+downloads/
+.storysurfer/
+# Legacy local state from before the StorySurfer rename; retain but never commit it.
+.redditsurfer/
 *.mp3
 *.wav
 *.mp4

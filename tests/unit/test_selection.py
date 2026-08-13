@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from redditsurfer.config import SelectionConfig
-from redditsurfer.domain import Comment, SelectionResult, ThreadSnapshot
-from redditsurfer.editorial.select import select_thread
+from storysurfer.config import SelectionConfig
+from storysurfer.domain import Comment, SelectionResult, ThreadSnapshot
+from storysurfer.editorial.select import select_thread
 
 
 def test_direct_op_reply_is_atomic_and_keeps_parent_first(

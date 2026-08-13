@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from redditsurfer.editorial.clean import clean_for_speech, sentence_extract
+from storysurfer.editorial.clean import clean_for_speech, sentence_extract
 
 
 def test_cleanup_preserves_link_labels_and_redacts_identifiers() -> None:

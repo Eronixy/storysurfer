@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 from collections.abc import Sequence
 
-from redditsurfer.media.capabilities import check_media_capabilities
+from storysurfer.media.capabilities import check_media_capabilities
 
 
 def test_reports_missing_binaries() -> None:

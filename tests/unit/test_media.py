@@ -6,12 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from redditsurfer.config import MediaConfig
-from redditsurfer.domain import CaptionArtifact, CaptionCue, CaptionWord, SpeechArtifact
-from redditsurfer.errors import MediaError
-from redditsurfer.media.probe import MediaInfo, probe_media
-from redditsurfer.media.render import build_ffmpeg_command
-from redditsurfer.media.timeline import build_timeline
+from storysurfer.config import MediaConfig
+from storysurfer.domain import CaptionArtifact, CaptionCue, CaptionWord, SpeechArtifact
+from storysurfer.errors import MediaError
+from storysurfer.media.probe import MediaInfo, probe_media
+from storysurfer.media.render import build_ffmpeg_command
+from storysurfer.media.timeline import build_timeline
 
 
 def _runner_with_metadata(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:

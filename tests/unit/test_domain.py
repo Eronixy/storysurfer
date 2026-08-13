@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from redditsurfer.domain import ThreadSnapshot
+from storysurfer.domain import ThreadSnapshot
 
 
 def test_thread_snapshot_round_trip(thread_snapshot: ThreadSnapshot) -> None:

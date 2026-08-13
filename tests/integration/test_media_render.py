@@ -11,13 +11,13 @@ from typing import cast
 
 import pytest
 
-from redditsurfer.captions.ass import render_ass
-from redditsurfer.captions.srt import render_srt
-from redditsurfer.config import AppConfig, CaptionConfig, MediaConfig
-from redditsurfer.domain import CaptionArtifact, CaptionCue, CaptionWord, SpeechArtifact
-from redditsurfer.pipeline import preview
-from redditsurfer.speech.wav import encode_wav
-from redditsurfer.storage import RunStorage
+from storysurfer.captions.ass import render_ass
+from storysurfer.captions.srt import render_srt
+from storysurfer.config import AppConfig, CaptionConfig, MediaConfig
+from storysurfer.domain import CaptionArtifact, CaptionCue, CaptionWord, SpeechArtifact
+from storysurfer.pipeline import preview
+from storysurfer.speech.wav import encode_wav
+from storysurfer.storage import RunStorage
 
 pytestmark = pytest.mark.skipif(
     shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None,

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from redditsurfer.config import SpeechConfig
-from redditsurfer.speech.alignment import validate_segment_speech
-from redditsurfer.speech.edge import EdgeTTSSpeechProvider
+from storysurfer.config import SpeechConfig
+from storysurfer.speech.alignment import validate_segment_speech
+from storysurfer.speech.edge import EdgeTTSSpeechProvider
 
 
 def test_edge_stream_is_normalized_to_pcm_words() -> None:
@@ -70,3 +70,59 @@ def test_provider_settings_include_every_voice_affecting_option() -> None:
         "output_format": "audio-24khz-48kbitrate-mono-mp3",
         "sample_rate": 24_000,
     }
+
+
+def test_float_word_boundaries_are_accepted_and_rounded() -> None:
+    pcm = b"\x00\x00" * 24_000
+    provider = EdgeTTSSpeechProvider(
+        SpeechConfig(voice="en-US-FixtureNeural"),
+        stream_factory=lambda _text, _config: iter(
+            [
+                {"type": "audio", "data": b"mp3"},
+                {
+                    "type": "WordBoundary",
+                    "offset": 1_250_000.0,
+                    "duration": 1_000_000.5,
+                    "text": "maganda",
+                },
+            ]
+        ),
+        mp3_decoder=lambda _value, _rate: pcm,
+    )
+
+    speech = provider.synthesize("maganda")
+
+    assert [(word.text, word.start_ms, word.end_ms) for word in speech.words] == [
+        ("maganda", 125, 225)
+    ]
+    validate_segment_speech(speech)
+
+
+def test_zero_duration_nonspoken_boundary_is_ignored() -> None:
+    pcm = b"\x00\x00" * 24_000
+    provider = EdgeTTSSpeechProvider(
+        SpeechConfig(voice="en-US-FixtureNeural"),
+        stream_factory=lambda _text, _config: iter(
+            [
+                {"type": "audio", "data": b"mp3"},
+                {
+                    "type": "WordBoundary",
+                    "offset": 0,
+                    "duration": 0,
+                    "text": "🤣",
+                },
+                {
+                    "type": "WordBoundary",
+                    "offset": 100_000,
+                    "duration": 1_000_000,
+                    "text": "maganda",
+                },
+            ]
+        ),
+        mp3_decoder=lambda _value, _rate: pcm,
+    )
+
+    speech = provider.synthesize("🤣 maganda")
+
+    assert [word.text for word in speech.words] == ["maganda"]
+    validate_segment_speech(speech)

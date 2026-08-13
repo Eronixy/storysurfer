@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from redditsurfer.errors import AlignmentError
-from redditsurfer.speech.alignment import words_from_character_alignment
+from storysurfer.errors import AlignmentError
+from storysurfer.speech.alignment import words_from_character_alignment
 
 
 def test_character_alignment_becomes_word_timing() -> None:

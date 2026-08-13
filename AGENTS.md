@@ -2,7 +2,7 @@
 
 ## Mission
 
-Build RedditSurfer as a reliable, reviewable Python pipeline with CLI and local web interfaces that turns a public Reddit story and user-supplied gameplay footage into a narrated vertical video. The product requirements and phased roadmap live in `IMPLEMENTATION_PLAN.md`; read it before changing architecture or adding a pipeline stage.
+Build StorySurfer as a reliable, reviewable Python pipeline with CLI and local web interfaces that turns a public Reddit story and user-supplied gameplay footage into a narrated vertical video. The product requirements and phased roadmap live in `IMPLEMENTATION_PLAN.md`; read it before changing architecture or adding a pipeline stage.
 
 The two product-critical behaviors are:
 
@@ -13,9 +13,9 @@ The two product-critical behaviors are:
 
 - Python 3.11+
 - `uv` for dependency and command execution
-- `src/redditsurfer` package layout
+- `src/storysurfer` package layout
 - FFmpeg/ffprobe for media inspection and rendering
-- FastAPI, server-rendered Jinja templates, progressive enhancement, and minimal vanilla JavaScript for the local web UI
+- Gradio Blocks with minimal custom CSS for the local web UI
 - One application-service layer shared by the CLI, web routes, and local job worker
 
 The repository is initially minimal. Commands named below may not exist yet; introduce them in the phase that owns them and keep this file accurate.
@@ -27,7 +27,7 @@ The repository is initially minimal. Commands named below may not exist yet; int
 - Prefer typed, provider-neutral domain models over passing unvalidated dictionaries.
 - Keep selection, caption chunking, timing, and timeline calculations pure and deterministic.
 - Put network, TTS, filesystem, and subprocess behavior behind narrow adapters.
-- Keep web route handlers thin; they validate/authorize input and call the same application services as the CLI.
+- Keep Gradio callbacks thin; they validate input and call the same application services as the CLI.
 - Build subprocess commands as argument lists. Never interpolate Reddit text or file paths into a shell command.
 - Do not add a remote AI service as a requirement for the deterministic MVP path.
 - Do not make paid/network calls in tests. Use fake adapters and sanitized fixtures.
@@ -58,14 +58,13 @@ Provider adapters may depend on provider SDK types internally. Those types must 
 - The browser interface is a first-class MVP workflow, but it must not duplicate pipeline or editorial logic.
 - Do not invoke CLI commands from web request handlers. Call application services with typed inputs.
 - Never run Reddit, TTS, alignment, or FFmpeg work inside the HTTP request lifecycle. Enqueue it through the durable local worker.
-- Persist job/stage state before publishing progress. Server-sent events are a live view; manifests and the job store are authoritative after reconnect.
+- Persist job/stage state before publishing progress. Timer refreshes are a live view; manifests and the job store are authoritative after reconnect.
 - Make enqueueing idempotent by run, stage, and relevant input/config hash so double-clicks cannot repeat paid work.
 - A selection edit must keep commenter + OP reply atomic. A script/style edit must invalidate all affected downstream artifacts.
-- Use POST/Redirect/GET for ordinary forms and return structured errors for progressively enhanced requests.
-- Require CSRF protection for state-changing routes. Keep template autoescaping enabled and treat all Reddit/user text as untrusted.
+- Keep callback APIs private, bind state-changing callbacks to a browser-session token, enable strict CORS, and treat all Reddit/user text as untrusted.
 - Generate run IDs server-side. Resolve and containment-check every upload/artifact path; never expose an arbitrary-path download endpoint.
 - Stream uploads to a staging directory, enforce configurable size limits, and validate media content with ffprobe before promotion.
-- Artifact endpoints use an allowlist and support byte ranges for video playback without exposing private/raw artifacts.
+- Return only allowlisted artifact paths. Use Gradio video/file delivery for playback without exposing private/raw artifacts.
 - Bind the development server to `127.0.0.1` by default. Non-loopback binding must show an explicit security warning and must not be presented as production-ready.
 - Keep controls keyboard accessible, status understandable without color, and generated-video previews usable on laptop/tablet screens.
 
@@ -105,8 +104,8 @@ Provider adapters may depend on provider SDK types internally. Those types must 
 ## Media and rights rules
 
 - Gameplay, music, fonts, and other creative assets must be supplied or licensed for the intended use.
-- Do not implement gameplay downloading, DRM bypasses, watermark removal, or scraping from video platforms.
-- Treat `subway` and `minecraft` as composition presets for user-provided footage, not sources of branded assets.
+- The optional `download.py` may fetch one explicitly supplied YouTube video only after a rights acknowledgement. Do not add search/discovery, playlists, cookies, DRM bypasses, or watermark removal.
+- Treat `subway` and `minecraft` as composition presets, not sources of branded assets.
 - Probe input media before render and reject missing video streams or unsupported/corrupt inputs early.
 - Strip gameplay audio by default; if retained, duck it beneath narration.
 - Require the configured rights acknowledgement for a final render. Preview rendering may remain available for review.
@@ -134,7 +133,7 @@ uv run mypy src
 uv run pytest
 ```
 
-For web changes, add route/service tests using fake providers and temporary run storage. Test CSRF behavior, validation errors, template escaping, upload limits, path traversal rejection, idempotent job submission, restart recovery, and HTTP range responses where relevant. Do not require a live browser, Reddit, or TTS account for the default suite.
+For web changes, add callback/service tests using fake providers and temporary run storage. Test session-token behavior, validation errors, safe text rendering, upload limits, path traversal rejection, idempotent job submission, restart recovery, and artifact allowlisting where relevant. Do not require a live browser, Reddit, or TTS account for the default suite.
 
 For media changes, also run the short integration render and inspect it with `ffprobe`. Do not claim visual correctness from a successful process exit alone; verify dimensions, streams, duration, timestamps, and caption boundaries. If a visual change is material, generate a low-resolution preview for human review.
 

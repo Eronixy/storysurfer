@@ -5,13 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from redditsurfer.config import SpeechConfig
-from redditsurfer.domain import NarrationScript, NarrationSegment, SourceRef
-from redditsurfer.errors import SpeechError
-from redditsurfer.speech.base import RelativeWord, SegmentSpeech
-from redditsurfer.speech.service import synthesize_script
-from redditsurfer.speech.wav import decode_wav
-from redditsurfer.storage import RunStorage, json_hash
+from storysurfer.config import SpeechConfig
+from storysurfer.domain import NarrationScript, NarrationSegment, SourceRef
+from storysurfer.errors import SpeechError
+from storysurfer.speech.base import RelativeWord, SegmentSpeech
+from storysurfer.speech.service import synthesize_script
+from storysurfer.speech.wav import decode_wav
+from storysurfer.storage import RunStorage, json_hash
 
 
 @dataclass

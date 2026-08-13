@@ -1,4 +1,4 @@
-# RedditSurfer implementation plan
+# StorySurfer implementation plan
 
 ## 1. Product goal
 
@@ -69,7 +69,7 @@ Reddit URL + gameplay.mp4 + config
 Example target command:
 
 ```bash
-uv run redditsurfer build \
+uv run storysurfer build \
   --url "https://www.reddit.com/r/example/comments/abc123/example/" \
   --background assets/gameplay/minecraft-parkour-01.mp4 \
   --preset minecraft \
@@ -86,18 +86,17 @@ The corresponding browser flow is: create a project, upload/select gameplay, rev
 Keep orchestration separate from provider integrations and pure timeline logic.
 
 ```text
-src/redditsurfer/
+src/storysurfer/
   cli.py                  # CLI entry points and user-facing errors
   config.py               # validated YAML/env/CLI configuration
   domain.py               # provider-neutral dataclasses/models
   pipeline.py             # resumable build orchestration
+  gradio_ui.py            # Gradio Blocks application and bounded callbacks
   web/
-    app.py                # FastAPI application factory and middleware
-    routes.py             # HTML and JSON endpoints
-    forms.py              # validated browser inputs
-    jobs.py               # durable local job dispatch and progress events
-    templates/            # Jinja pages and reusable fragments
-    static/               # project CSS and small progressive-enhancement JS
+    jobs.py               # durable local job dispatch and progress state
+    models.py             # validated browser project settings
+    service.py            # shared pipeline job executor
+    artifacts.py          # public artifact allowlist and redaction
   reddit/
     client.py             # supported Reddit API adapter
     normalize.py          # API response -> ThreadSnapshot
@@ -123,10 +122,10 @@ tests/
   fixtures/               # small sanitized API snapshots and media fixtures
   unit/                   # selection, scripting, captions, timeline
   integration/            # fake providers and short FFmpeg renders
-  web/                    # route, form, upload, progress, and browser-flow tests
+  web/                    # job recovery, idempotence, and cancellation tests
 ```
 
-Use FastAPI with server-rendered Jinja templates, HTMX-style partial updates, and minimal vanilla JavaScript for the MVP. This keeps the frontend in the Python project and avoids a separate Node build. The UI must call application services directly; it must never shell out to the CLI or duplicate editorial/rendering logic.
+Use Gradio Blocks with minimal custom CSS for the MVP. The UI calls application services directly; it never shells out to the CLI or duplicates editorial/rendering logic. Slow work is enqueued through the durable worker rather than performed in callbacks. Edge TTS voices are loaded from the provider catalog and filtered by specialized language/locale instead of accepting an unchecked voice string.
 
 ### Domain model
 
@@ -173,7 +172,7 @@ Selection should be deterministic, explainable, and tested independently of narr
 - Use the body as the main story.
 - Remove markdown formatting while preserving list and paragraph pauses.
 - Skip boilerplate edits, link trackers, repeated updates, and pronunciation-hostile URL text.
-- Truncate only at sentence boundaries and record the omission in the script metadata.
+- Keep the complete cleaned post body in the narration by default; duration is advisory until a reviewer explicitly shortens it.
 
 ### Eligible comments
 
@@ -223,7 +222,7 @@ Estimate speech at a configurable words-per-minute rate before invoking TTS. A r
 - 25%: comments and OP exchanges;
 - 5%: pauses and outro buffer.
 
-Fill the comment budget with whole candidates. Prefer fewer complete exchanges over many cut-off comments. If the post alone exceeds the budget, preserve the opening, core event, and resolution when they can be found without inventing text; otherwise make a sentence-boundary extract and surface a warning for review.
+Fill the comment budget with whole candidates. Prefer fewer complete exchanges over many cut-off comments. If the complete post alone exceeds the target, retain it and surface a warning that the narration will run long unless a reviewer explicitly edits it.
 
 ## 7. Narration and speech
 
@@ -342,6 +341,7 @@ Precedence should be CLI flags or validated web-form values, then project config
 - Avoid reading usernames aloud and redact phone numbers, email addresses, physical addresses, and similar identifiers before TTS.
 - Never imply that a generated voice is the Reddit author's real voice.
 - Require an explicit `--acknowledge-rights` gate before final rendering; preview generation can remain ungated.
+- Keep optional YouTube acquisition in the standalone `download.py`: accept one explicit video URL, reject playlists, require a rights acknowledgement, and do not support discovery, cookies, DRM bypasses, or watermark removal.
 - Store the exact spoken-text/source mapping so a human can review attribution and transformations.
 
 Automated filters reduce risk but do not replace review. The CLI should print the script and source report location before the final render step; the web UI should show the same source-linked review and require an explicit confirmation.
@@ -351,14 +351,14 @@ Automated filters reduce risk but do not replace review. The CLI should print th
 Planned commands:
 
 ```text
-redditsurfer ingest URL                 fetch and snapshot a thread
-redditsurfer select RUN                 score and select story material
-redditsurfer script RUN                 build a reviewable narration script
-redditsurfer narrate RUN                synthesize and align speech
-redditsurfer preview RUN --background   render a short/low-resolution preview
-redditsurfer render RUN --background    render the final video
-redditsurfer verify RUN                 validate artifacts and output media
-redditsurfer build URL --background     execute all applicable stages
+storysurfer ingest URL                 fetch and snapshot a thread
+storysurfer select RUN                 score and select story material
+storysurfer script RUN                 build a reviewable narration script
+storysurfer narrate RUN                synthesize and align speech
+storysurfer preview RUN --background   render a short/low-resolution preview
+storysurfer render RUN --background    render the final video
+storysurfer verify RUN                 validate artifacts and output media
+storysurfer build URL --background     execute all applicable stages
 ```
 
 Every command should support `--help`, return a non-zero exit status on failure, and print the run ID plus next useful action. `--dry-run` should show planned providers, duration budget, asset probes, and output paths without API or TTS charges.
@@ -367,13 +367,13 @@ Every command should support `--help`, return a non-zero exit status on failure,
 
 ### Technology and deployment
 
-The MVP web UI is a local-first FastAPI application launched with:
+The MVP web UI is a local-first Gradio Blocks application launched with:
 
 ```bash
-uv run redditsurfer web --host 127.0.0.1 --port 8000
+uv run storysurfer web --host 127.0.0.1 --port 7860
 ```
 
-Bind to loopback by default and show a warning when binding to a non-loopback address. Use server-rendered Jinja templates and progressive enhancement so core review actions still work without a large client bundle. A small durable local worker executes slow pipeline stages outside request handlers and records job state in SQLite plus the run manifest. This is a single-machine queue, not a distributed job system.
+Bind to loopback by default and show a warning when binding to a non-loopback address. Use Gradio Blocks and minimal custom CSS for the local workflow. A durable local worker executes slow pipeline stages outside callbacks and records job state in SQLite plus the run manifest. This is a single-machine queue, not a distributed job system.
 
 ### Required screens
 
@@ -385,37 +385,27 @@ Bind to loopback by default and show a warning when binding to a non-loopback ad
 6. **Preview and render** - show stage progress and logs, play the low-resolution preview, surface warnings, accept the rights acknowledgement, and start/cancel the final render.
 7. **Artifacts** - play the final video and download MP4, ASS, SRT, script, selection report, and redacted manifest.
 
-### HTTP surface
+### Browser action surface
 
-Keep HTML routes and a small JSON/SSE surface under stable prefixes:
+Gradio's internal routes are an implementation detail. Keep these typed application actions stable and expose their events as private callbacks:
 
 ```text
-GET  /                         dashboard
-GET  /runs/new                project form
-POST /runs                    validate inputs and create run
-GET  /runs/{run_id}           run overview
-GET  /runs/{run_id}/sources   source and comment-exchange review
-POST /runs/{run_id}/selection apply atomic selection changes
-GET  /runs/{run_id}/script    script review/editor
-POST /runs/{run_id}/script    save a new script revision
-POST /runs/{run_id}/preview   enqueue preview build
-POST /runs/{run_id}/render    acknowledge rights and enqueue final build
-POST /runs/{run_id}/cancel    request cooperative cancellation
-GET  /runs/{run_id}/events    server-sent progress events
-GET  /runs/{run_id}/artifacts/{name}  allowlisted artifact download
+dashboard / create project / review sources / save selection
+edit script / save style / enqueue preview / enqueue final
+cancel job / poll status / load allowlisted artifacts
 ```
 
-Use POST/Redirect/GET for HTML forms. Return structured validation errors for enhanced requests. Job progress events should include stage, state, percentage when meaningful, and a safe human-readable message; the manifest remains the source of truth after reconnect or restart.
+Job status includes stage, state, percentage when meaningful, and a safe human-readable message. Periodic polling reads the durable job store; the manifest remains authoritative after reconnect or restart.
 
 ### Web security and file handling
 
 - Treat the UI as untrusted input even when it runs locally.
-- Use CSRF protection for state-changing browser requests and secure cookie settings appropriate to the deployment mode.
+- Use strict CORS, private callback APIs, and per-session action tokens for state-changing requests.
 - Generate server-side run IDs; never accept filesystem paths as run IDs or artifact names.
 - Allowlist upload extensions only as an early hint, then inspect file signatures and validate media with ffprobe.
 - Stream uploads to a per-run staging directory with configurable byte and duration limits; never load full videos into memory.
-- Sanitize display text, rely on template autoescaping, and never render Reddit HTML as trusted markup.
-- Serve only allowlisted artifacts from resolved paths proven to remain inside that run directory, with HTTP range support for video playback.
+- Sanitize display text, use text/table components, and never render Reddit HTML as trusted markup.
+- Return only allowlisted artifacts inside the run directory; Gradio provides video playback and range delivery.
 - Do not expose secrets, source author hashes, raw environment data, unrestricted logs, or arbitrary local files through routes.
 - Prevent duplicate paid work by making enqueue operations idempotent per run, stage, and input/config hash.
 - Support cooperative cancellation between segments/processes and terminate owned FFmpeg child processes cleanly.
@@ -454,7 +444,7 @@ Acceptance: fixture tests prove that a useful parent comment is included with it
 
 ### Phase 2 - script, TTS, and alignment
 
-Status: implemented with source-linked review artifacts, deterministic cleanup and sentence-boundary editing, an Edge TTS word-boundary adapter, MP3-to-PCM normalization, per-segment WAV caching, absolute word alignment, and an offline fake provider.
+Status: implemented with source-linked review artifacts, deterministic cleanup with complete-post narration, an Edge TTS word-boundary adapter, MP3-to-PCM normalization, per-segment WAV caching, absolute word alignment, and an offline fake provider.
 
 - Implement text cleanup, source-linked script generation, speech adapter, per-segment caching, pauses, and timestamps.
 - Emit a human-readable script/source report before network synthesis and support a fake offline speech provider in tests.
@@ -488,10 +478,15 @@ Acceptance: one command can build from a cached Reddit fixture and local gamepla
 
 ### Phase 5 - local web UI
 
-- Add the FastAPI application, server-rendered screens, validated forms, uploads, artifact streaming, and source/script review.
-- Add the durable single-machine job worker, cancellation, reconnectable progress events, and restart recovery.
+Status: implemented with a minimalist Gradio Blocks browser workflow, bounded and
+worker-validated gameplay uploads, source and atomic OP-exchange review, source-preserving
+script edits, Edge TTS/style controls, durable SQLite jobs, cooperative cancellation,
+reconnectable polling, rights-gated rendering, and allowlisted artifacts.
+
+- Add the Gradio application, validated controls, uploads, artifacts, and source/script review.
+- Add the durable single-machine job worker, cancellation, reconnectable polling, and restart recovery.
 - Connect preview/final rendering to the same application services and cache rules used by the CLI.
-- Add CSRF protection, path containment, upload limits, template escaping, and web accessibility checks.
+- Add session action tokens, strict CORS, path containment, upload limits, safe text rendering, and accessibility checks.
 
 Acceptance: a browser user can create a run, review an atomic commenter/OP exchange, revise the script, watch progress survive a refresh, play a preview, acknowledge rights, render the final video, and download allowlisted artifacts. Route tests prove path traversal and invalid uploads are rejected, duplicate submissions do not repeat paid work, and a server restart can recover job/run status.
 
@@ -522,9 +517,9 @@ These should not complicate the MVP interfaces until the end-to-end path is stab
 - Fake TTS audio and timestamps through ASS/SRT generation.
 - A 5-10 second synthetic FFmpeg render probed for expected media properties.
 - Stage resume after a simulated provider failure.
-- Web form through run creation using fake Reddit/TTS adapters.
+- Gradio callback/service workflow through run creation using fake Reddit/TTS adapters.
 - Job progress reconnect/recovery and idempotent preview/render enqueueing.
-- Upload validation, CSRF, path traversal, template escaping, and artifact range requests.
+- Upload validation, session action tokens, path traversal, safe text rendering, and artifact allowlisting.
 
 ### Manual acceptance checklist
 

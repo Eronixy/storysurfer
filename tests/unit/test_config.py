@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from redditsurfer.config import load_config
-from redditsurfer.errors import ConfigurationError
+from storysurfer.config import load_config
+from storysurfer.errors import ConfigurationError
 
 
 def test_environment_supplies_secrets_without_exposing_them(tmp_path: Path) -> None:

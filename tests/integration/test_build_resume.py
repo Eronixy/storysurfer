@@ -9,12 +9,12 @@ from pathlib import Path
 
 import pytest
 
-from redditsurfer.config import AppConfig, CaptionConfig, MediaConfig
-from redditsurfer.domain import JsonValue, ThreadSnapshot, Timeline
-from redditsurfer.errors import MediaError, RightsError
-from redditsurfer.pipeline import build
-from redditsurfer.speech.base import RelativeWord, SegmentSpeech
-from redditsurfer.storage import RunStorage
+from storysurfer.config import AppConfig, CaptionConfig, MediaConfig
+from storysurfer.domain import JsonValue, ThreadSnapshot, Timeline
+from storysurfer.errors import MediaError, RightsError
+from storysurfer.pipeline import build
+from storysurfer.speech.base import RelativeWord, SegmentSpeech
+from storysurfer.storage import RunStorage
 
 pytestmark = pytest.mark.skipif(
     shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None,

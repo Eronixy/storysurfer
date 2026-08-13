@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from redditsurfer.domain import ThreadSnapshot
-from redditsurfer.errors import StorageError
-from redditsurfer.storage import RunStorage
+from storysurfer.domain import ThreadSnapshot
+from storysurfer.errors import StorageError
+from storysurfer.storage import RunStorage
 
 
 def test_run_artifacts_are_atomic_and_hashed(

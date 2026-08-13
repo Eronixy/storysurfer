@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from redditsurfer.config import (
+from storysurfer.config import (
     AppConfig,
     MediaConfig,
     RedditConfig,
     SelectionConfig,
     StorageConfig,
 )
-from redditsurfer.domain import ThreadSnapshot
+from storysurfer.domain import ThreadSnapshot
 
 
 @pytest.fixture
@@ -21,7 +21,7 @@ def app_config(tmp_path: Path) -> AppConfig:
         reddit=RedditConfig(
             client_id="test-client",
             client_secret="test-secret",
-            user_agent="linux:redditsurfer:test (synthetic)",
+            user_agent="linux:storysurfer:test (synthetic)",
             author_hash_salt="test-salt",
         ),
         selection=SelectionConfig(target_duration_seconds=90),

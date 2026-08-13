@@ -1,7 +1,7 @@
 reddit:
   # Credentials are environment-only: REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET.
   # Use REDDIT_USER_AGENT or replace this non-identifying development value locally.
-  user_agent: "linux:redditsurfer:0.1.0 (development)"
+  user_agent: "linux:storysurfer:0.1.0 (development)"
   comment_sort: "best"
   max_comments: 250
   replace_more_limit: 8
@@ -66,3 +66,9 @@ speech:
   receive_timeout_seconds: 60
   pronunciations:
     AITA: "am I the asshole"
+
+web:
+  database_path: ".storysurfer/jobs.sqlite3"
+  upload_max_megabytes: 1024
+  upload_duration_limit_seconds: 3600
+  refresh_interval_seconds: 2

@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from redditsurfer.config import AppConfig
-from redditsurfer.domain import JsonValue
-from redditsurfer.pipeline import caption_run, ingest, narrate, script_run, select
-from redditsurfer.reddit.models import RawComment, RawPost, RawThread
-from redditsurfer.reddit.url import RedditReference
-from redditsurfer.speech.base import RelativeWord, SegmentSpeech
-from redditsurfer.storage import RunStorage
+from storysurfer.config import AppConfig
+from storysurfer.domain import JsonValue
+from storysurfer.pipeline import caption_run, ingest, narrate, script_run, select
+from storysurfer.reddit.models import RawComment, RawPost, RawThread
+from storysurfer.reddit.url import RedditReference
+from storysurfer.speech.base import RelativeWord, SegmentSpeech
+from storysurfer.storage import RunStorage
 
 
 @dataclass

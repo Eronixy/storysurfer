@@ -1,5 +1,5 @@
 [project]
-name = "redditsurfer"
+name = "storysurfer"
 version = "0.1.0"
 description = "Build narrated vertical videos from source-linked Reddit stories"
 readme = "README.md"
@@ -9,13 +9,15 @@ authors = [
 requires-python = ">=3.11"
 dependencies = [
     "edge-tts>=7.2.8,<8",
+    "gradio>=6.20,<7",
     "miniaudio>=1.60,<2",
     "praw>=8.0.2,<9",
     "pyyaml>=6.0.2,<7",
+    "yt-dlp[default]>=2026.7.4",
 ]
 
 [project.scripts]
-redditsurfer = "redditsurfer.cli:main"
+storysurfer = "storysurfer.cli:main"
 
 [dependency-groups]
 dev = [
@@ -39,14 +41,14 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
-packages = ["redditsurfer"]
+packages = ["storysurfer"]
 
 [[tool.mypy.overrides]]
 module = ["praw", "praw.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["edge_tts", "edge_tts.*", "miniaudio"]
+module = ["edge_tts", "edge_tts.*", "gradio", "gradio.*", "miniaudio"]
 ignore_missing_imports = true
 
 [build-system]

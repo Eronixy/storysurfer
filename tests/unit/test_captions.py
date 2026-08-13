@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from redditsurfer.captions import build_caption_artifact, render_ass, render_srt
-from redditsurfer.config import CaptionConfig, MediaConfig
-from redditsurfer.domain import (
+from storysurfer.captions import build_caption_artifact, render_ass, render_srt
+from storysurfer.config import CaptionConfig, MediaConfig
+from storysurfer.domain import (
     NarrationScript,
     NarrationSegment,
     SourceRef,

@@ -4,9 +4,9 @@ from datetime import UTC, datetime
 
 import pytest
 
-from redditsurfer.errors import SourceError
-from redditsurfer.reddit.models import RawComment, RawPost, RawThread
-from redditsurfer.reddit.normalize import normalize_thread
+from storysurfer.errors import SourceError
+from storysurfer.reddit.models import RawComment, RawPost, RawThread
+from storysurfer.reddit.normalize import normalize_thread
 
 
 def _raw_thread(*, over_18: bool = False) -> RawThread:
