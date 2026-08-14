@@ -2,8 +2,6 @@
 
 StorySurfer turns a public Reddit post, relevant comments, and direct OP replies into a narrated vertical video over licensed Minecraft parkour or Subway Surfers-style gameplay. It uses Edge TTS, word-timed pop-up captions, resumable rendering, and a local Gradio web UI.
 
-See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for architecture and roadmap details.
-
 ## Requirements
 
 - Python environment managed with `uv`
