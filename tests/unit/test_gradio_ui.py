@@ -10,6 +10,7 @@ from storysurfer.config import AppConfig, StorageConfig, WebConfig
 from storysurfer.errors import WebError
 from storysurfer.gradio_ui import (
     CSS,
+    GradioApplication,
     _centralized_script_text,
     _copy_upload,
     _parse_centralized_script,
@@ -18,6 +19,19 @@ from storysurfer.gradio_ui import (
     _validate_upload,
     create_gradio_app,
 )
+
+
+def test_gradio_launch_applies_css(app_config: AppConfig) -> None:
+    launch_options: dict[str, object] = {}
+    demo = SimpleNamespace(launch=lambda **options: launch_options.update(options))
+    worker = SimpleNamespace(start=lambda: None, stop=lambda: None)
+    application = GradioApplication(demo=demo, worker=worker, config=app_config)
+
+    application.launch("127.0.0.1", 7860, False)
+
+    assert launch_options["css"] == CSS
+    assert launch_options["server_name"] == "127.0.0.1"
+    assert launch_options["server_port"] == 7860
 
 
 def test_gradio_ui_exposes_private_complete_workflow(app_config: AppConfig, tmp_path: Path) -> None:
@@ -54,7 +68,8 @@ def test_gradio_ui_exposes_private_complete_workflow(app_config: AppConfig, tmp_
     ]
     assert len(delete_modals) == 1
     assert not delete_modals[0]["props"]["visible"]
-    assert browser["css"] == CSS
+    # Gradio 6 applies CSS at launch time instead of storing it in the Blocks config.
+    assert browser["css"] is None
     assert "#delete-project-dialog" in CSS
     assert "#confirm-delete-project" in CSS
     assert "height: auto !important" in CSS

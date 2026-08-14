@@ -158,6 +158,8 @@ class GradioApplication:
                 enable_monitoring=False,
                 footer_links=[],
                 max_file_size=f"{self.config.web.upload_max_megabytes}mb",
+                theme=gr.themes.Base(primary_hue="blue", neutral_hue="stone"),
+                css=CSS,
                 blocked_paths=[
                     str(Path(".env").resolve()),
                     str(Path("config.yaml").resolve()),
@@ -284,8 +286,6 @@ def _build_ui(
         fill_width=True,
         analytics_enabled=False,
         delete_cache=(3600, 86400),
-        theme=gr.themes.Base(primary_hue="blue", neutral_hue="stone"),
-        css=CSS,
     ) as demo:
         csrf = gr.State("")
         gr.Markdown(
